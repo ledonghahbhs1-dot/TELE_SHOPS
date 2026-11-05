@@ -6,6 +6,8 @@ Bot đang chạy `shop_bot.py` của AGY trên Railway, dữ liệu SQLite ở v
 
 Website `withTransaction` bọc `client.query` và trả thẳng mảng rows; adapter Telegram không được truy cập `.rows` thêm lần nữa. Lỗi này từng làm claim trả HTTP 500 và ngăn tạo hóa đơn Plisio. Endpoint trạng thái bị giới hạn 10 lượt/phút, worker phải giãn nhịp gọi; xử lý tự động hiện quét tối đa 100 đơn trong 7 ngày gần nhất, các đơn cũ hơn cần kiểm tra riêng. Plisio phải được kiểm tra với giao dịch thực trước khi khẳng định hoạt động hoàn chỉnh.
 
+Một lần tạo Plisio thật từng bị nhà cung cấp từ chối HTTP 422, mã 106; mã này chưa đủ để kết luận nguyên nhân. Web có chẩn đoán lọc nội dung an toàn để ghi thông báo lỗi ngắn vào log Vercel, không ghi URL, secret hoặc token dài. Sau lần người dùng bấm tạo hóa đơn mới, đối chiếu log trước khi sửa cấu hình hoặc giá.
+
 Mục Đơn hàng VIP đã mua chỉ liệt kê đơn local `completed`, gồm link đã giao, không liệt kê giao dịch pending/cancelled hoặc thông tin chuyển khoản. Không gửi cảnh báo đối soát cho admin khi người mua bấm kiểm tra mà chưa thấy tiền. Đơn paid nhưng chưa giao phải được khôi phục một cách idempotent, không tự ý đánh dấu giao thành công khi chưa cấp đủ link.
 
 Giá sản phẩm lấy từ `tg_products` trên dashboard thông qua API xác thực `GET /api/tg/products/price`. Bot cache giá tối đa 10 giây để hiển thị và bắt buộc lấy giá mới trước khi tạo VietQR; khi web không trả giá hợp lệ, bot không tạo hóa đơn VietQR theo giá cũ. Thay đổi giá chỉ áp dụng cho đơn mới, không sửa số tiền đã lưu của đơn cũ. Hóa đơn Plisio do web tính giá. Cập nhật giá qua dashboard là nguồn giá chính.

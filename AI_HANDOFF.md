@@ -103,11 +103,12 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   `gemini_plus` is active at 1.00 USDT, and 294 links are available. No Telegram
   Plisio invoice rows exist. Railway previously logged only `HTTPError` when
   invoice creation failed. The bot now records only the HTTP status and a
-  validated API error code. The Plisio handler also records/returns the
-  provider's validated error code and HTTP status (never provider URLs, messages
-  or secrets); inspect Railway/Vercel logs after the next retry to identify
-  whether Plisio rejects the key/IP or invoice parameters. No real invoice was
-  created during diagnosis.
+  validated API error code. A later real request reached Plisio and failed with
+  HTTP 422 / provider code 106. The code alone does not identify the cause.
+  The handler now logs an allowlisted short provider error message when safe;
+  URLs, emails, long tokens and text containing the secret are rejected.
+  Inspect Vercel logs after the next user-initiated retry. No real invoice was
+  created during this diagnostic update.
 - Root cause found later: Telegram transaction adapters in `api/index.ts` read
   `.rows` from `client.query`, although `withTransaction` already returns the
   rows array. This broke both stock claim and the Telegram Plisio flow; both
