@@ -64,7 +64,7 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         status = lambda code: {"status": "paid" if code == "TGSPAY1234" else "pending"}
         with patch.object(shop_bot, "check_web_order_status", side_effect=status), \
              patch.object(shop_bot, "send_paid_order_delivery", new_callable=AsyncMock) as deliver, \
-             patch.object(shop_bot.asyncio, "sleep", new_callable=AsyncMock, side_effect=asyncio.CancelledError):
+             patch.object(shop_bot.asyncio, "sleep", new_callable=AsyncMock, side_effect=[None, None, asyncio.CancelledError]):
             with self.assertRaises(asyncio.CancelledError):
                 await shop_bot.auto_deliver_paid_orders_task(SimpleNamespace(bot=object()))
         self.assertEqual(deliver.await_count, 1)

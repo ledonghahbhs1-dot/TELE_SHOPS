@@ -91,6 +91,12 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   or secrets); inspect Railway/Vercel logs after the next retry to identify
   whether Plisio rejects the key/IP or invoice parameters. No real invoice was
   created during diagnosis.
+- Root cause found later: Telegram transaction adapters in `api/index.ts` read
+  `.rows` from `client.query`, although `withTransaction` already returns the
+  rows array. This broke both stock claim and the Telegram Plisio flow; both
+  adapters were corrected. Confirm a real Plisio invoice/callback separately.
+  Bot polling is spaced to respect the 10/min status endpoint limit; automatic
+  recovery scans the newest 100 local orders within seven days.
 
 Run `python -m unittest discover -s tests -v` in this repository. Web checks include
 `pnpm exec tsx scripts/test-tg-plisio.ts`, `pnpm run test:tg-runtime`, and

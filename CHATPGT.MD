@@ -4,6 +4,8 @@ Bot đang chạy `shop_bot.py` của AGY trên Railway, dữ liệu SQLite ở v
 
 Đơn VietQR được bot đồng bộ lên Wolfmod, SePay xác nhận qua `/api/webhook/sepay`. SePay cần nhận diện tiền tố `TGS` với hậu tố gồm chữ và số; không coi trạng thái thanh toán là đã giao hàng. Worker bot kiểm tra đơn local và trạng thái web, gọi `/api/tg/stock/claim` để lấy đúng link theo đơn đã xác nhận. API claim phải duy trì tính idempotent. Bot gửi link kèm hướng dẫn; `delivery_notified_at` chỉ được ghi sau khi Telegram chấp nhận tin nhắn, và worker thử lại khi gửi thất bại. Nếu tiến trình dừng sau khi Telegram nhận tin nhưng trước khi ghi SQLite, có thể gửi lặp; không được cấp link khác cho cùng đơn.
 
+Website `withTransaction` bọc `client.query` và trả thẳng mảng rows; adapter Telegram không được truy cập `.rows` thêm lần nữa. Lỗi này từng làm claim trả HTTP 500 và ngăn tạo hóa đơn Plisio. Endpoint trạng thái bị giới hạn 10 lượt/phút, worker phải giãn nhịp gọi; xử lý tự động hiện quét tối đa 100 đơn trong 7 ngày gần nhất, các đơn cũ hơn cần kiểm tra riêng. Plisio phải được kiểm tra với giao dịch thực trước khi khẳng định hoạt động hoàn chỉnh.
+
 Mục Đơn hàng VIP đã mua chỉ liệt kê đơn local `completed`, gồm link đã giao, không liệt kê giao dịch pending/cancelled hoặc thông tin chuyển khoản. Không gửi cảnh báo đối soát cho admin khi người mua bấm kiểm tra mà chưa thấy tiền. Đơn paid nhưng chưa giao phải được khôi phục một cách idempotent, không tự ý đánh dấu giao thành công khi chưa cấp đủ link.
 
 `AI_HANDOFF.md` có cấu hình triển khai, đối soát và các giới hạn còn lại. Không ghi token, secret hay link kho vào Git hoặc log. Không tự nạp stock từ file máy. VietQR của `TGSE6F70932` đã được admin xác nhận thủ công; `TGSB74D2E96` đã đối soát mã SePay `96426765`.

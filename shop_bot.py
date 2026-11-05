@@ -1971,6 +1971,8 @@ async def auto_deliver_paid_orders_task(application: Application):
             ).fetchall()
             conn.close()
             for row in rows:
+                # The web status endpoint has a 10 requests/minute limit.
+                await asyncio.sleep(8)
                 if row["status"] == "completed":
                     await send_paid_order_delivery(application.bot, row["order_id"], row["user_id"])
                     continue
