@@ -1,78 +1,47 @@
-# TELE_SHOPS — shared Wolfmod store
+# TELE_SHOPS — original AGY shop bot
 
-Telegram storefront for the existing Wolfmod database and admin dashboard.
-Prices, products, inventory, payments, orders and delivery receipts are stored by
-Wolfmod. The bot uses signed HTTPS requests; it never connects directly to Supabase.
+The active application is `shop_bot.py`, copied from `D:\gpl\shop_bot.py`.
+It includes AGY's original custom emoji IDs, VIP menus, product banner, quantity
+selection, VietQR and USDT screens, order history, activation guide and admin tools.
+`main.py` is a compatibility entry point for existing Railway start overrides.
+The previous aiogram modules remain in Git history and are not used by this app.
 
-## Railway variables
+## Railway
 
-Copy `.env.example` into Railway Variables and fill in:
+- Set `BOT_TOKEN` (or `SHOP_BOT_TOKEN`) and `ADMIN_ID` in the bot service Variables.
+- Attach a Railway Volume mounted at `/data`; set `SHOP_DATA_DIR=/data`.
+  SQLite orders and settings must survive redeploys. Run one replica.
+- Use the included Dockerfile and start command `python shop_bot.py`.
+- This original AGY implementation does not require `WOLFMOD_API_SECRET`.
+- Keep Vercel's `TG_SALES_BOT_TOKEN` equal to the active bot token for the original
+  `/api/tg/orders/*` and `/api/tg/stock/*` integration. These are different routes
+  from the newer signed `/api/bot/*` integration; verify the legacy routes are
+  enabled on the website before accepting orders.
+- Stop any other running instance using the same token before Railway starts polling.
 
-| Variable | Value |
-| --- | --- |
-| `BOT_TOKEN` | New token from BotFather; revoke the old exposed token first. |
-| `OWNER_IDS` | Your Telegram user ID; comma-separated for several owners. |
-| `WOLFMOD_API_SECRET` | Same secret as `TG_BOT_API_SECRET` on Wolfmod Vercel; at least 32 characters. |
-| `WOLFMOD_API_URL` | `https://www.wolfmod.xyz` |
-| `PRODUCT_SKU` | `gemini_plus` |
-| `ALLOWED_GROUP_IDS` | Your negative group ID, for example `-1001234567890`; empty rejects all groups. |
-| `POLL_INTERVAL_SEC` | `15` |
+Manage stock from the Wolfmod dashboard. No local inventory files or databases
+are included in this repository or imported automatically.
 
-Deploy using the included Dockerfile with **one replica**. No port, domain, Volume,
-SQLite, Supabase connection string, price, or SePay API token is needed on Railway.
-Copy `.env.example` to `.env` for local use, install `requirements.txt`, and run `python main.py`.
+USDT in the original AGY bot uses a configured BEP20 wallet; it does not create
+Plisio invoices. The original local database still had a placeholder wallet.
+Set `USDT_WALLET` to a real BEP20 address, or use the owner's `/setusdt` command.
+Checkout rejects an unconfigured wallet before creating an order.
 
-## Wolfmod configuration
+## Local use
 
-Set `TG_BOT_API_SECRET` on Vercel to match Railway's `WOLFMOD_API_SECRET`, then redeploy.
-The website's existing authenticated SePay webhook confirms payments in `tg_orders`.
-Keep the receiving bank account synchronized with SePay. Default receiving details
-match the existing Wolfmod account; optional Vercel overrides are `TG_BANK_BIN`,
-`TG_BANK_NAME`, `TG_ACCOUNT_NO`, `TG_ACCOUNT_NAME`.
+Copy `.env.example` to `.env`, fill the token, and set `SHOP_DATA_DIR=./data`.
+Install `requirements.txt`, then run `python shop_bot.py`.
+The original database in `D:\gpl` has not been copied or changed. A fresh deployment
+starts with new local order history/settings; existing AGY orders need a deliberate
+SQLite migration into the mounted Volume if they must be retained.
 
-`TG_SALES_BOT_TOKEN` on Vercel is optional for automated delivery by this bot.
-Set it to the same new Telegram token if you also use dashboard manual delivery or
-the website's Telegram payment notifications. Never use an admin session/password
-as the bot's API credential.
+## Changes to the original AGY source
 
-Manage inventory, active products and prices at:
-https://www.wolfmod.xyz/m7k9xq2r/dashboard#tg-sales
+The interface and menus are retained. Deployment adaptations add a configurable
+persistent data directory, the missing `timedelta` import, import-safe UTF-8 stream
+configuration and rejection of the placeholder USDT wallet. The banner is copied
+unchanged from the original AGY assets.
 
-## Customer flow
-
-1. `/start` reads the active product and current price from Wolfmod.
-2. `/buy` creates a server-priced, idempotent order in the shared dashboard and shows
-   its VietQR QR code with the server's `TGS…` bank-transfer memo.
-3. SePay's existing webhook marks that order paid. Clicking “I've paid” only queries
-   the server; it cannot confirm or change payment status.
-4. The bot polls the database-backed delivery queue. A transaction reserves stock
-   for that paid order; only after Telegram accepts the message does a signed receipt
-   mark the dashboard order delivered.
-5. `/orders` or `/myorders` shows only the sender's orders.
-
-Orders and unfinished deliveries survive Railway restarts. A lost receipt is retried
-without allocating another link. If the process crashes after Telegram accepts a
-message but before the receipt is stored, the same purchased links may be resent after
-the two-minute lease expires; inventory is not allocated twice.
-
-## Owner and groups
-
-- `/stock`: count the shared inventory, only in the owner's private chat.
-- `/dashboard` and `/addlinks`: open the existing admin dashboard. Upload stock there;
-  there is no second inventory or Telegram-based bulk export/import.
-- Start the bot privately as an owner before adding it to a group. If an unknown
-  group adds it, the bot leaves and privately sends its ID to the owner. Put that ID
-  in `ALLOWED_GROUP_IDS`, redeploy Railway, then add the bot again.
-- Promote the bot manually in your group. `/start` or `/buy` there opens a private
-  customer conversation. The bot does not implement member moderation.
-- After adding it to your group, BotFather `/setjoingroups` → Disable prevents new
-  group additions. The allowlist also rejects unapproved groups.
-
-## Migration and tests
-
-The previous SQLite implementation is no longer used. Existing ignored local data
-files are not uploaded or migrated automatically; the Wolfmod inventory is the source
-of truth. Do not run the previous standalone SQLite deployment at the same time.
-
-Run `python -m unittest discover -s tests -v`. Tests use local HTTP fixtures and mocked
-Telegram delivery, without real payments, customer messages, or production stock.
+Run `python -m unittest discover -s tests -v` for offline checks; these do not send
+Telegram messages or create real payments. Old aiogram tests cover the inactive
+previous implementation; `test_agy_shop.py` covers the active AGY application.

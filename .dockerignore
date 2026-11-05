@@ -7,6 +7,12 @@ data/
 *.db-*
 *.sqlite*
 seed_links*.txt
+claimed_links*.txt
+used_links.txt
+used_delete_links.txt
+links.txt
+*.bak
+*.bak2
 __pycache__/
 *.pyc
 .venv/

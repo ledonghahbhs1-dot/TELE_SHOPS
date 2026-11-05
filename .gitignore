@@ -43,6 +43,12 @@ venv.bak/
 *.sqlite
 *.sqlite3
 data/*.db
+claimed_links*.txt
+used_links.txt
+used_delete_links.txt
+links.txt
+*.bak
+*.bak2
 
 # IDE & OS
 .vscode/
