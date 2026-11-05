@@ -108,7 +108,9 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   the TRC20 invoice must exceed 5 USDT. Admin requested BEP20, so production
   `TG_PLISIO_CURRENCY` and the application default were changed to `USDT_BSC`.
   Existing invoices retain their original stored network. The product currently
-  costs 0.5 USDT and the BEP20 minimum must be confirmed with the provider; do
+  costs 0.5 USDT; a subsequent live BEP20 request returned provider code 106 and
+  explicitly required an amount greater than 1 USDT. Three links at 0.5 USDT
+  total 1.5 USDT, but a successful BEP20 invoice/payment remains unverified. Do
   not silently increase the price. The bot reports validated provider minima.
   The handler now logs an allowlisted short provider error message when safe;
   URLs, emails, long tokens and text containing the secret are rejected.
