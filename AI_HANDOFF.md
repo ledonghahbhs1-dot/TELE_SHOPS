@@ -47,6 +47,11 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   fetches fresh prices before creating VietQR; an unavailable price blocks new
   VietQR creation rather than silently using stale prices. Existing order amounts
   remain snapshots; Plisio invoices use the web price.
+- Admin price changes via `PUT /api/admin/tg/products/:id` send a VIP-emoji
+  Telegram notice to `ADMIN_ID` (same fallback as stock alerts), only when VND
+  or USDT actually changes. The response field `price_notification` reports
+  sent/failed/unchanged; a Telegram failure does not roll back the price change
+  and the notice currently has no durable retry queue.
 
 ## Checks and outstanding security task
 
