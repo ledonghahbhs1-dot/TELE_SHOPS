@@ -41,6 +41,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+# HTTP request URLs contain the Telegram token; do not emit them in service logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ==================== CẤU HÌNH BOT ====================
 BOT_TOKEN = os.getenv("SHOP_BOT_TOKEN") or os.getenv("BOT_TOKEN", "").strip()
