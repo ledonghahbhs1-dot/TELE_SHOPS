@@ -69,6 +69,13 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   before local cancellation, so a paid order can still deliver on the customer's
   next check. Stock is available (294 links) and the new bot release needs to be
   deployed/confirmed before retesting this order.
+- Admin manually confirmed receipt of the 20,000 VND transfer for `TGSE6F70932`
+  (its transfer memo) on 2026-11-05. Wolfmod had no matching SePay webhook, so the
+  order was set to `paid` with the explicit reference
+  `ADMIN_CONFIRMED:TGSE6F70932`; this is an admin attestation, not a bank
+  transaction ID. The customer must press the bot's payment-check button to
+  trigger the delivery flow. Do not replace this reference with a fabricated
+  SePay transaction ID.
 - Plisio diagnosis 2026-11-05: production has `PLISIO_SECRET_KEY` configured,
   `gemini_plus` is active at 1.00 USDT, and 294 links are available. No Telegram
   Plisio invoice rows exist. Railway previously logged only `HTTPError` when
