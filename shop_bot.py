@@ -142,6 +142,12 @@ def init_database():
             cursor.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT")
         except sqlite3.OperationalError:
             pass
+    try:
+        cursor.execute("ALTER TABLE orders ADD COLUMN delivery_notified_at TIMESTAMP")
+        # Existing completed orders were already handled by the old bot.
+        cursor.execute("UPDATE orders SET delivery_notified_at = COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE status = 'completed'")
+    except sqlite3.OperationalError:
+        pass
 
     # 4. Bảng cấu hình hệ thống (Settings)
     cursor.execute("""
@@ -675,6 +681,7 @@ async def sync_order_to_web_async(order_id: str, tg_user_id: int, tg_username: s
 
 # Trạng thái chờ người dùng nhập số lượng tuỳ chỉnh: user_id -> sku
 AWAITING_QTY_USERS: dict[int, str] = {}
+DELIVERY_LOCK = asyncio.Lock()
 
 def format_delivered_links_message(order_id: str, delivered_links: list[str]) -> tuple[str, list]:
     """Định dạng tin nhắn và nút mở link sau khi thanh toán thành công"""
@@ -683,7 +690,7 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str]) ->
         msg = (
             f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{order_id}</code>!</b>\n\n"
             f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
-            f"{vip_em('key', '🔗')} <b>Link nhận Google AI Plus 400GB (12 Tháng - BH 24h):</b>\n<code>{single_link}</code>\n\n"
+            f"{vip_em('key', '🔗')} <b>Link nhận Google AI Plus 400GB (12 Tháng - BH 24h):</b>\n<code>{html.escape(single_link)}</code>\n\n"
             f"{vip_em('diamond', '💎')} <b>Hướng dẫn kích hoạt 3 bước:</b>\n"
             f"{vip_em('num1', '1️⃣')} Mở link trên trình duyệt có Gmail cá nhân của bạn.\n"
             f"{vip_em('num2', '2️⃣')} Bấm 'Bắt đầu dùng thử' hoặc 'Nhận ưu đãi' 2TB.\n"
@@ -696,12 +703,13 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str]) ->
             [vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
         ]
         return msg, buttons
+
     else:
         qty = len(delivered_links)
         links_text = ""
         buttons = []
         for idx, lk in enumerate(delivered_links, 1):
-            links_text += f"{vip_em('star', '✦')} <b>Link #{idx}:</b> <code>{lk}</code>\n"
+            links_text += f"{vip_em('star', '✦')} <b>Link #{idx}:</b> <code>{html.escape(lk)}</code>\n"
             buttons.append([vip_btn(f"👑 Mở Link #{idx} 👑", url=lk, emoji_name="crown", style="primary")])
 
         msg = (
@@ -719,6 +727,32 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str]) ->
         buttons.append([vip_btn("📦 Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="box")])
         buttons.append([vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
         return msg, buttons
+
+
+async def send_paid_order_delivery(bot, order_id, user_id):
+    """Claim the paid order idempotently and retry Telegram delivery until accepted."""
+    async with DELIVERY_LOCK:
+        conn = get_db_connection()
+        row = conn.execute("SELECT delivery_notified_at FROM orders WHERE order_id = ? AND user_id = ?", (order_id, user_id)).fetchone()
+        conn.close()
+        if not row:
+            return False
+        if row["delivery_notified_at"]:
+            return True
+        links = await asyncio.to_thread(deliver_product, order_id, user_id)
+        if not links:
+            return False
+        body, buttons = format_delivered_links_message(order_id, links)
+        try:
+            await bot.send_message(chat_id=int(user_id), text=body, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
+        except Exception as error:
+            logger.warning("Không gửi được link đơn %s: %s", order_id, type(error).__name__)
+            return False
+        conn = get_db_connection()
+        conn.execute("UPDATE orders SET delivery_notified_at = CURRENT_TIMESTAMP WHERE order_id = ? AND user_id = ?", (order_id, user_id))
+        conn.commit()
+        conn.close()
+        return True
 
 async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
     """Hiển thị màn hình xác nhận đơn hàng kèm nút thanh toán VietQR và USDT theo số lượng"""
@@ -1340,10 +1374,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if order["status"] == "completed":
+            if not order["delivery_notified_at"]:
+                sent = await send_paid_order_delivery(context.bot, order_id, user_id)
+                await query.answer("Đã gửi link." if sent else "Đang thử gửi link, vui lòng thử lại.", show_alert=True)
+                return
             links = (order["item_delivered"] or "").splitlines()
             if links:
                 msg_body, link_buttons = format_delivered_links_message(order_id, links)
                 await query.message.reply_text(msg_body, reply_markup=InlineKeyboardMarkup(link_buttons), parse_mode="HTML")
+                conn = get_db_connection()
+                conn.execute("UPDATE orders SET delivery_notified_at = CURRENT_TIMESTAMP WHERE order_id = ? AND user_id = ?", (order_id, user_id))
+                conn.commit()
+                conn.close()
             await query.answer("✅ Đơn hàng đã được bàn giao.", show_alert=True)
             return
 
@@ -1351,36 +1393,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # may have been marked paid by the website while this SQLite order is stale.
         web_stat = check_web_order_status(order_id)
         if web_stat.get("status") in ("paid", "delivered"):
-            delivered_links = deliver_product(order_id, user_id)
-            if delivered_links:
-                await query.answer("✅ Giao dịch đã được xác nhận thành công!", show_alert=True)
-                msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links)
-                await query.message.reply_text(
-                    msg_body,
-                    reply_markup=InlineKeyboardMarkup(link_buttons),
-                    parse_mode="HTML"
-                )
-                if ADMIN_ID and str(ADMIN_ID).isdigit():
-                    try:
-                        links_summary = "\n".join([f"• <code>{lk}</code>" for lk in delivered_links])
-                        await context.bot.send_message(
-                            chat_id=int(ADMIN_ID),
-                            text=(
-                                f"{vip_em('lightning', '⚡️')} <b>ĐƠN HÀNG VIP <code>{order_id}</code> ĐÃ ĐƯỢC TỰ ĐỘNG XÁC THỰC!</b>\n"
-                                f"{vip_em('user', '👤')} <b>Khách VIP:</b> {user.mention_html()} (ID: <code>{user_id}</code>)\n"
-                                f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{len(delivered_links)} link</code>\n"
-                                f"{vip_em('key', '🔑')} <b>Link bàn giao:</b>\n{links_summary}"
-                            ),
-                            parse_mode="HTML"
-                        )
-                    except Exception:
-                        pass
+            if await send_paid_order_delivery(context.bot, order_id, user_id):
+                await query.answer("Giao dịch đã được xác nhận thành công!", show_alert=True)
                 return
 
             await query.answer("Đã nhận thanh toán; đang chờ xử lý link.", show_alert=True)
             await query.message.reply_text(
-                f"{vip_em('check', '✅')} <b>Đã xác nhận thanh toán đơn <code>{html.escape(order_id)}</code>.</b>\n"
-                f"{vip_em('calendar', '⏳')} Link chưa thể giao tự động lúc này. Vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.",
+                f"{vip_em('check', '✅')} <b>Thanh toán đã được xác nhận cho đơn <code>{html.escape(order_id)}</code>.</b>\n"
+                f"{vip_em('calendar', '⏳')} Link chưa thể giao tự động lúc này.\n"
+                f"{vip_em('chat', '💬')} Vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.",
                 reply_markup=InlineKeyboardMarkup([[vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")]]),
                 parse_mode="HTML"
             )
@@ -1476,56 +1497,24 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "my_orders":
         conn = get_db_connection()
         rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 5",
-            (user_id,)
+            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' ORDER BY completed_at DESC, created_at DESC LIMIT 10",
+            (user_id,),
         ).fetchall()
         conn.close()
-
+        orders_text = f"{vip_em('diamond')} ═══════ {vip_em('crown')} <b>ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown')} ═══════ {vip_em('diamond')}\n\n"
         if not rows:
-            orders_text = (
-                f"{vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')} <b>LỊCH SỬ ĐƠN HÀNG VIP</b> {vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')}\n\n"
-                f"{vip_em('box', '📦')} <b>Quý khách chưa có đơn hàng nào!</b>\n"
-                f"Hãy khám phá các gói đặc quyền tại Sảnh VIP nhé."
+            orders_text += f"{vip_em('box')} <b>Quý khách chưa có đơn hàng nào đã giao.</b>"
+        for row in rows:
+            orders_text += (
+                f"{vip_em('tag')} <b>Đơn hàng:</b> <code>{html.escape(str(row['order_id']))}</code>\n"
+                f"{vip_em('box')} <b>Sản phẩm:</b> Google AI Plus 400GB (12 Tháng)\n"
+                f"{vip_em('calendar')} <b>Thời gian:</b> <code>{html.escape(str(row['completed_at'] or row['created_at'] or ''))}</code>\n"
+                f"{vip_em('key')} <b>Link kích hoạt:</b>\n<code>{html.escape(str(row['item_delivered'] or ''))}</code>\n"
+                "──────────────────────────\n"
             )
-        else:
-            orders_text = f"{vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')} <b>DANH SÁCH ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            for r in rows:
-                status = str(r["status"] or "unknown")
-                if status == "pending":
-                    status_label = "Đang chờ thanh toán/xác nhận"
-                    status_emoji = vip_em("calendar", "⏳")
-                elif status == "completed":
-                    status_label = "Đã thanh toán và giao hàng"
-                    status_emoji = vip_em("check", "✅")
-                elif status == "cancelled":
-                    status_label = "Đã hủy"
-                    status_emoji = vip_em("cross", "❌")
-                else:
-                    status_label = html.escape(status)
-                    status_emoji = vip_em("shield", "ℹ️")
-
-                orders_text += (
-                    f"{vip_em('crown', '👑')} <b>Đơn hàng:</b> <code>{html.escape(str(r['order_id']))}</code>\n"
-                    f"{status_emoji} <b>Trạng thái:</b> {status_label}\n"
-                    f"{vip_em('money', '💰')} <b>Số tiền:</b> <code>{int(float(r['amount'])):,} {html.escape(str(r['currency'] or 'VND'))}</code>\n"
-                    f"{vip_em('calendar', '📅')} <b>Thời gian:</b> <code>{html.escape(str(r['created_at'] or ''))}</code>\n"
-                )
-                if (r["payment_method"] or "vietqr") == "vietqr":
-                    orders_text += (
-                        f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{html.escape(str(r['bank_name'] or get_setting('bank_name', 'ACB')))}</code> (Ngân Hàng Á Châu)\n"
-                        f"{vip_em('card', '💳')} <b>Số tài khoản:</b> <code>{html.escape(str(r['bank_account'] or get_setting('bank_account', '68986683')))}</code>\n"
-                        f"{vip_em('user', '👤')} <b>Chủ tài khoản:</b> <code>{html.escape(str(r['bank_owner'] or get_setting('bank_owner', 'LE DONG HA')))}</code>\n"
-                        f"{vip_em('memo', '📝')} <b>Nội dung chuyển khoản:</b> <code>{html.escape(str(r['order_id']))}</code>\n"
-                    )
-                if r["item_delivered"]:
-                    orders_text += f"{vip_em('key', '🔑')} <b>Link kích hoạt:</b> <code>{html.escape(str(r['item_delivered']))}</code>\n"
-                orders_text += (
-                    f"──────────────────────────\n"
-                )
-
         keyboard = [
-            [vip_btn(" Mua Thêm Gói VIP", callback_data="buy_gemini_plus", emoji_name="crown", style="primary")],
-            [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
+            [vip_btn("Mua Thêm Gói VIP", callback_data="buy_gemini_plus", emoji_name="crown", style="primary")],
+            [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
         ]
         await safe_edit_or_reply(query, orders_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -1968,6 +1957,31 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
         del AWAITING_QTY_USERS[user_id]
         await show_order_confirmation(update.message, user, sku=sku, qty=qty)
 
+async def auto_deliver_paid_orders_task(application: Application):
+    """Recover paid orders, including cancelled local orders and interrupted sends."""
+    while True:
+        try:
+            conn = get_db_connection()
+            rows = conn.execute(
+                """SELECT order_id, user_id, status FROM orders
+                   WHERE delivery_notified_at IS NULL
+                     AND status IN ('pending', 'cancelled', 'expired', 'completed')
+                     AND created_at >= datetime('now', '-7 days')
+                   ORDER BY created_at DESC LIMIT 100"""
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                if row["status"] == "completed":
+                    await send_paid_order_delivery(application.bot, row["order_id"], row["user_id"])
+                    continue
+                status = await asyncio.to_thread(check_web_order_status, row["order_id"])
+                if status.get("status") in ("paid", "delivered"):
+                    await send_paid_order_delivery(application.bot, row["order_id"], row["user_id"])
+        except Exception as error:
+            logger.error("Lỗi kiểm tra giao hàng tự động: %s", type(error).__name__)
+        await asyncio.sleep(15)
+
+
 async def auto_cancel_expired_orders_task(application: Application):
     """Vòng lặp tự động kiểm tra mỗi 15 giây: nếu đơn hàng pending quá 10 phút thì hủy đơn và gửi thông báo cho khách"""
     while True:
@@ -2044,6 +2058,7 @@ def run_shop_bot(token=None):
     async def post_init_hook(application: Application):
         # asyncio.create_task(watch_and_notify_new_links(application)) # TẮT HOÀN TOÀN THEO YÊU CẦU USER
         asyncio.create_task(auto_cancel_expired_orders_task(application))
+        asyncio.create_task(auto_deliver_paid_orders_task(application))
 
     app = Application.builder().token(use_token).post_init(post_init_hook).build()
 

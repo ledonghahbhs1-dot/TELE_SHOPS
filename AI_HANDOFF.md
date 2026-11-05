@@ -28,8 +28,8 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   be configured using Vercel `TG_PLISIO_CURRENCY`.
 - Plisio callbacks reach `/api/webhook/plisio?json=true`; the web checks the HMAC,
   invoice transaction ID, currency and amount before marking the order paid.
-  Late payments are marked `needs_review`. The customer presses the bot's check
-  button to trigger the original AGY delivery flow.
+  Late payments are marked `needs_review`. The bot automatically checks local
+  orders against web payment status and sends the claimed links and instructions.
 - An unconfirmed payment check informs the buyer to contact @wolfmodyt if already
   paid, using AGY custom emoji IDs. It must not send a reconciliation alert to the
   admin; provider errors and confirmed payments awaiting stock have distinct text.
@@ -55,11 +55,9 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   empty. A separate test order `TGSD146733F` remained `pending` at 08:39:23 UTC.
   The admin later supplied SePay transaction `96426765` and the order was
   reconciled as described below. Do not fabricate SePay references.
-- Bot order history now includes the five newest orders of every status and
-  displays the VietQR bank, account, owner and order-code memo. VietQR details
-  are snapshotted on order creation/payment-method switch and backfilled for
-  older SQLite orders from settings at startup. Keep those fields and the
-  persistent `/data` volume during future changes.
+- Bot purchase history lists completed deliveries only, with links, and excludes
+  pending/cancelled payment transactions. VietQR account details remain stored
+  with orders. Keep those fields and the persistent `/data` volume.
 - Delivery investigation 2026-11-05: the bot checked local 10-minute expiry and
   cancellation before asking Wolfmod whether an order was paid. The test order
   `TGS37939776` is paid in Wolfmod (`payment_ref=96428678`) but has no
@@ -72,8 +70,8 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   (its transfer memo) on 2026-11-05. Wolfmod had no matching SePay webhook, so the
   order was set to `paid` with the explicit reference
   `ADMIN_CONFIRMED:TGSE6F70932`; this is an admin attestation, not a bank
-  transaction ID. The customer must press the bot's payment-check button to
-  trigger the delivery flow. Do not replace this reference with a fabricated
+  transaction ID. The bot can recover this paid order automatically.
+  Do not replace this reference with a fabricated
   SePay transaction ID.
 - Admin supplied SePay transaction list: `96509305` / `TGSE6F70932` and
   `96426765` / `TGSB74D2E96` were incoming 20,000 VND, but SePay showed no

@@ -1,0 +1,9 @@
+﻿# Hướng dẫn tiếp tục TELE_SHOPS
+
+Bot đang chạy `shop_bot.py` của AGY trên Railway, dữ liệu SQLite ở volume `/data`. Giữ nguyên kho trên Wolfmod và các custom emoji ID trong `VIP_EMOJIS`, sử dụng `vip_em()` cho nội dung HTML và `vip_btn()` cho nút Telegram. Các thông báo nhập kho và thay đổi giá phải tiếp tục sử dụng emoji custom ID, không thay bằng emoji thường. Bản web định dạng thông báo nhập kho trong `api/_lib/tg-sales-routes.ts`.
+
+Đơn VietQR được bot đồng bộ lên Wolfmod, SePay xác nhận qua `/api/webhook/sepay`. SePay cần nhận diện tiền tố `TGS` với hậu tố gồm chữ và số; không coi trạng thái thanh toán là đã giao hàng. Worker bot kiểm tra đơn local và trạng thái web, gọi `/api/tg/stock/claim` để lấy đúng link theo đơn đã xác nhận. API claim phải duy trì tính idempotent. Bot gửi link kèm hướng dẫn; `delivery_notified_at` chỉ được ghi sau khi Telegram chấp nhận tin nhắn, và worker thử lại khi gửi thất bại. Nếu tiến trình dừng sau khi Telegram nhận tin nhưng trước khi ghi SQLite, có thể gửi lặp; không được cấp link khác cho cùng đơn.
+
+Mục Đơn hàng VIP đã mua chỉ liệt kê đơn local `completed`, gồm link đã giao, không liệt kê giao dịch pending/cancelled hoặc thông tin chuyển khoản. Không gửi cảnh báo đối soát cho admin khi người mua bấm kiểm tra mà chưa thấy tiền. Đơn paid nhưng chưa giao phải được khôi phục một cách idempotent, không tự ý đánh dấu giao thành công khi chưa cấp đủ link.
+
+`AI_HANDOFF.md` có cấu hình triển khai, đối soát và các giới hạn còn lại. Không ghi token, secret hay link kho vào Git hoặc log. Không tự nạp stock từ file máy. VietQR của `TGSE6F70932` đã được admin xác nhận thủ công; `TGSB74D2E96` đã đối soát mã SePay `96426765`.

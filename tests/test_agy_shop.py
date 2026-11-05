@@ -23,6 +23,53 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
 
+    async def test_paid_delivery_retries_telegram_without_claiming_twice(self):
+        conn = shop_bot.get_db_connection()
+        conn.execute("INSERT INTO orders (order_id,user_id,product_id,amount,status,quantity) VALUES (?,?,?,?,?,?)", ("TGSTEST1234", 123, "gemini_plus", 20000, "pending", 1))
+        conn.commit()
+        conn.close()
+        bot = SimpleNamespace(send_message=AsyncMock(side_effect=[RuntimeError("offline"), None]))
+        with patch.object(shop_bot, "claim_stock_from_web", return_value="https://example.com/activate?a=1&b=2") as claim:
+            self.assertFalse(await shop_bot.send_paid_order_delivery(bot, "TGSTEST1234", 123))
+            self.assertTrue(await shop_bot.send_paid_order_delivery(bot, "TGSTEST1234", 123))
+            self.assertTrue(await shop_bot.send_paid_order_delivery(bot, "TGSTEST1234", 123))
+        self.assertEqual(claim.call_count, 1)
+        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertIn("&amp;", bot.send_message.await_args.kwargs["text"])
+        self.assertIn("Hướng dẫn kích hoạt", bot.send_message.await_args.kwargs["text"])
+
+    async def test_purchase_history_only_shows_completed_orders(self):
+        conn = shop_bot.get_db_connection()
+        for code, status, link in [("TGSPURCHASED", "completed", "https://example.com/link"), ("TGSCANCELLED", "cancelled", None), ("TGSPENDING", "pending", None)]:
+            conn.execute("INSERT INTO orders (order_id,user_id,product_id,amount,status,item_delivered) VALUES (?,?,?,?,?,?)", (code, 123, "gemini_plus", 20000, status, link))
+        conn.commit()
+        conn.close()
+        query = SimpleNamespace(data="my_orders", answer=AsyncMock())
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
+        with patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render:
+            await shop_bot.callback_handler(update, SimpleNamespace())
+        text = render.await_args.args[1]
+        self.assertIn("TGSPURCHASED", text)
+        self.assertNotIn("TGSCANCELLED", text)
+        self.assertNotIn("TGSPENDING", text)
+        self.assertNotIn("Số tài khoản", text)
+        self.assertIn('emoji-id="6005570495603282482"', text)
+
+    async def test_worker_delivers_only_orders_confirmed_paid(self):
+        conn = shop_bot.get_db_connection()
+        for code in ("TGSPAY1234", "TGSWAIT1234"):
+            conn.execute("INSERT INTO orders (order_id,user_id,product_id,amount,status) VALUES (?,?,?,?,?)", (code, 123, "gemini_plus", 20000, "pending"))
+        conn.commit()
+        conn.close()
+        status = lambda code: {"status": "paid" if code == "TGSPAY1234" else "pending"}
+        with patch.object(shop_bot, "check_web_order_status", side_effect=status), \
+             patch.object(shop_bot, "send_paid_order_delivery", new_callable=AsyncMock) as deliver, \
+             patch.object(shop_bot.asyncio, "sleep", new_callable=AsyncMock, side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await shop_bot.auto_deliver_paid_orders_task(SimpleNamespace(bot=object()))
+        self.assertEqual(deliver.await_count, 1)
+        self.assertEqual(deliver.await_args.args[1], "TGSPAY1234")
+
     async def test_original_confirmation_has_both_payments_and_quantity(self):
         target = SimpleNamespace(edit_message_text=AsyncMock())
         with patch.object(shop_bot, "get_stock_count", return_value=10), \
