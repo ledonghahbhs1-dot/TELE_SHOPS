@@ -893,14 +893,26 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def create_web_plisio_invoice(order_id, user, qty):
     import json
+    import re
+    import urllib.error
     import urllib.request
     from urllib.parse import urlsplit
     payload = json.dumps({"order_code": order_id, "tg_user_id": user.id,
                           "tg_username": user.username or "", "sku": "gemini_plus", "qty": qty}).encode("utf-8")
     req = urllib.request.Request("https://www.wolfmod.xyz/api/tg/orders/plisio", data=payload,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {BOT_TOKEN}"}, method="POST")
-    with urllib.request.urlopen(req, timeout=25) as response:
-        invoice = json.loads(response.read())
+    try:
+        with urllib.request.urlopen(req, timeout=25) as response:
+            invoice = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        try:
+            body = json.loads(error.read(2048).decode("utf-8", errors="replace"))
+            error_code = body.get("error", "request_rejected")
+            if not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code):
+                error_code = "request_rejected"
+        except Exception:
+            error_code = "request_rejected"
+        raise RuntimeError(f"HTTP {error.code}: {error_code}") from None
     url = urlsplit(invoice.get("invoice_url", ""))
     if not invoice.get("success") or url.scheme != "https" or url.username or url.password or not (
         url.hostname == "plisio.net" or (url.hostname or "").endswith(".plisio.net")
@@ -920,7 +932,9 @@ async def show_plisio_checkout(query, user, qty, order_id=None):
     try:
         invoice = await asyncio.to_thread(create_web_plisio_invoice, order_id, user, qty)
     except Exception as error:
-        logger.warning("Plisio invoice unavailable: %s", type(error).__name__)
+        message = str(error)
+        safe_error = message if re.fullmatch(r"HTTP [0-9]{3}: [a-z0-9_]{1,64}", message) else type(error).__name__
+        logger.warning("Plisio invoice unavailable: %s", safe_error)
         await safe_edit_or_reply(query,
             f"{vip_em('shield')} <b>Chưa thể tạo hóa đơn Plisio.</b>\n"
             "Vui lòng thử lại hoặc chọn thanh toán VietQR.",
@@ -1327,6 +1341,45 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("✅ Đơn hàng đã được bàn giao.", show_alert=True)
             return
 
+        # Confirm the provider status before local expiry/cancellation checks. VietQR
+        # may have been marked paid by the website while this SQLite order is stale.
+        web_stat = check_web_order_status(order_id)
+        if web_stat.get("status") in ("paid", "delivered"):
+            delivered_links = deliver_product(order_id, user_id)
+            if delivered_links:
+                await query.answer("✅ Giao dịch đã được xác nhận thành công!", show_alert=True)
+                msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links)
+                await query.message.reply_text(
+                    msg_body,
+                    reply_markup=InlineKeyboardMarkup(link_buttons),
+                    parse_mode="HTML"
+                )
+                if ADMIN_ID and str(ADMIN_ID).isdigit():
+                    try:
+                        links_summary = "\n".join([f"• <code>{lk}</code>" for lk in delivered_links])
+                        await context.bot.send_message(
+                            chat_id=int(ADMIN_ID),
+                            text=(
+                                f"{vip_em('lightning', '⚡️')} <b>ĐƠN HÀNG VIP <code>{order_id}</code> ĐÃ ĐƯỢC TỰ ĐỘNG XÁC THỰC!</b>\n"
+                                f"{vip_em('user', '👤')} <b>Khách VIP:</b> {user.mention_html()} (ID: <code>{user_id}</code>)\n"
+                                f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{len(delivered_links)} link</code>\n"
+                                f"{vip_em('key', '🔑')} <b>Link bàn giao:</b>\n{links_summary}"
+                            ),
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+                return
+
+            await query.answer("Đã nhận thanh toán; đang chờ xử lý link.", show_alert=True)
+            await query.message.reply_text(
+                f"{vip_em('check', '✅')} <b>Đã xác nhận thanh toán đơn <code>{html.escape(order_id)}</code>.</b>\n"
+                f"{vip_em('calendar', '⏳')} Link chưa thể giao tự động lúc này. Vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.",
+                reply_markup=InlineKeyboardMarkup([[vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")]]),
+                parse_mode="HTML"
+            )
+            return
+
         # Kiểm tra nếu đơn hàng đã bị hủy hoặc hết hạn
         if order["status"] in ("cancelled", "expired"):
             await query.answer("❌ Đơn hàng này đã hết hạn 10 phút hoặc đã bị hủy!", show_alert=True)
@@ -1379,35 +1432,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 qty = 1
 
-        # 1. Tự động kiểm tra trên Web Backend xem SePay đã xác thực chuyển khoản chưa
-        web_stat = check_web_order_status(order_id)
-        if web_stat.get("status") in ("paid", "delivered"):
-            delivered_links = deliver_product(order_id, user_id)
-            if delivered_links:
-                await query.answer("✅ Giao dịch đã được xác nhận thành công!", show_alert=True)
-                msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links)
-                await query.message.reply_text(
-                    msg_body,
-                    reply_markup=InlineKeyboardMarkup(link_buttons),
-                    parse_mode="HTML"
-                )
-                if ADMIN_ID and str(ADMIN_ID).isdigit():
-                    try:
-                        links_summary = "\n".join([f"• <code>{lk}</code>" for lk in delivered_links])
-                        await context.bot.send_message(
-                            chat_id=int(ADMIN_ID),
-                            text=(
-                                f"{vip_em('lightning', '⚡️')} <b>ĐƠN HÀNG VIP <code>{order_id}</code> ĐÃ ĐƯỢC TỰ ĐỘNG XÁC THỰC!</b>\n"
-                                f"{vip_em('user', '👤')} <b>Khách VIP:</b> {user.mention_html()} (ID: <code>{user_id}</code>)\n"
-                                f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{len(delivered_links)} link</code>\n"
-                                f"{vip_em('key', '🔑')} <b>Link bàn giao:</b>\n{links_summary}"
-                            ),
-                            parse_mode="HTML"
-                        )
-                    except Exception:
-                        pass
-                return
-
+        # Status was checked before the local expiry guard above.
         status = web_stat.get("status")
         if status in ("paid", "delivered"):
             notice = "<b>Thanh toán đã được xác nhận nhưng link chưa sẵn sàng.</b>"
@@ -1958,6 +1983,10 @@ async def auto_cancel_expired_orders_task(application: Application):
             for ord_row in expired_orders:
                 order_id = ord_row["order_id"]
                 user_id = ord_row["user_id"]
+                web_stat = await asyncio.to_thread(check_web_order_status, order_id)
+                if web_stat.get("status") in ("paid", "delivered"):
+                    logger.info("Giữ đơn %s đã được web xác nhận thanh toán, không tự hủy.", order_id)
+                    continue
                 conn.execute("UPDATE orders SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'", (order_id,))
                 conn.commit()
                 logger.info(f"Đã tự động hủy đơn hết hạn 10 phút: {order_id} (User: {user_id})")

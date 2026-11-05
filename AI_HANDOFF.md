@@ -61,6 +61,21 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   are snapshotted on order creation/payment-method switch and backfilled for
   older SQLite orders from settings at startup. Keep those fields and the
   persistent `/data` volume during future changes.
+- Delivery investigation 2026-11-05: the bot checked local 10-minute expiry and
+  cancellation before asking Wolfmod whether an order was paid. The test order
+  `TGS37939776` is paid in Wolfmod (`payment_ref=96428678`) but has no
+  `delivered_at`; the old local order was auto-cancelled at its 10-minute mark.
+  The bot callback and expiry task were changed to check the shared web order
+  before local cancellation, so a paid order can still deliver on the customer's
+  next check. Stock is available (294 links) and the new bot release needs to be
+  deployed/confirmed before retesting this order.
+- Plisio diagnosis 2026-11-05: production has `PLISIO_SECRET_KEY` configured,
+  `gemini_plus` is active at 1.00 USDT, and 294 links are available. No Telegram
+  Plisio invoice rows exist. Railway previously logged only `HTTPError` when
+  invoice creation failed. The bot now records only the HTTP status and a
+  validated API error code (never provider URLs or secrets); inspect Railway
+  logs after the next retry to identify whether Plisio rejects the key/IP or
+  invoice parameters. No real invoice was created during diagnosis.
 
 Run `python -m unittest discover -s tests -v` in this repository. Web checks include
 `pnpm exec tsx scripts/test-tg-plisio.ts`, `pnpm run test:tg-runtime`, and
