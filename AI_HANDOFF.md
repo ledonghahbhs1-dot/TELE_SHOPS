@@ -60,17 +60,16 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   with orders. Keep those fields and the persistent `/data` volume.
 - Delivery investigation 2026-11-05: the bot checked local 10-minute expiry and
   cancellation before asking Wolfmod whether an order was paid. The test order
-  `TGS37939776` is paid in Wolfmod (`payment_ref=96428678`) but has no
+  `TGS37939776` was paid in Wolfmod (`payment_ref=96428678`) but initially had no
   `delivered_at`; the old local order was auto-cancelled at its 10-minute mark.
   The bot callback and expiry task were changed to check the shared web order
   before local cancellation, so a paid order can still deliver on the customer's
-  next check. Stock is available (294 links) and the new bot release needs to be
-  deployed/confirmed before retesting this order.
+  next check. Automatic delivery was subsequently deployed and verified.
 - Admin manually confirmed receipt of the 20,000 VND transfer for `TGSE6F70932`
   (its transfer memo) on 2026-11-05. Wolfmod had no matching SePay webhook, so the
   order was set to `paid` with the explicit reference
   `ADMIN_CONFIRMED:TGSE6F70932`; this is an admin attestation, not a bank
-  transaction ID. The bot can recover this paid order automatically.
+  transaction ID. The order was subsequently returned to stock as an admin test.
   Do not replace this reference with a fabricated
   SePay transaction ID.
 - Admin supplied SePay transaction list: `96509305` / `TGSE6F70932` and
@@ -80,8 +79,16 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   SePay's payment-code pattern and webhook filters: TGS suffixes can include
   A-F as well as digits. Based on the admin's confirmation and supplied SePay
   transaction, `TGSB74D2E96` was manually marked paid with reference
-  `96426765`; paid_at is the manual reconciliation time. Verify delivery via
-  the customer payment-check flow. Do not duplicate delivery.
+  `96426765`; paid_at is the manual reconciliation time. It was subsequently
+  returned to stock as an admin test.
+- Admin requested that four test deliveries be returned: `TGSC470FB61`,
+  `TGSE6F70932`, `TGS37939776`, `TGSB74D2E96`. The four corresponding stock
+  items (IDs 2, 3, 4, 5) were restored to `available`, web orders marked
+  `cancelled` with `review_reason=admin_test_stock_return`, and local SQLite
+  orders marked `test_returned` with `item_delivered` cleared. The stock count
+  was 294 after the operation. Historical Telegram messages cannot be recalled;
+  their links must not be used after return. Do not reactivate or redeliver the
+  test orders, and do not treat `cancelled` as a monetary refund.
 - Plisio diagnosis 2026-11-05: production has `PLISIO_SECRET_KEY` configured,
   `gemini_plus` is active at 1.00 USDT, and 294 links are available. No Telegram
   Plisio invoice rows exist. Railway previously logged only `HTTPError` when

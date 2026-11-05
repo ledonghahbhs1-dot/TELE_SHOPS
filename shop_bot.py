@@ -1792,10 +1792,7 @@ def format_stock_added_notification(added_count: int, total_stock: int, sample_l
         f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>THÔNG BÁO KHO HÀNG VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
         f"{vip_em('party', '🎉')} <b>Hệ thống vừa cập nhật thêm <code>+{added_count}</code> link offer Gemini!</b>\n\n"
         f"├─ {vip_em('sparkle', '✨')} <b>Gói dịch vụ:</b> <b>Google AI Plus 400GB (12 Tháng)</b>\n"
-        f"├─ {vip_em('box', '📦')} <b>Tổng kho khả dụng:</b> <code>{total_stock}</code> link sẵn sàng bán\n"
-        f"├─ {vip_em('shield', '🛡')} <b>Bảo hành:</b> 24h (1 đổi 1 link mới)\n"
-        f"└─ {vip_em('lock', '🔒')} <b>Bảo mật:</b> Link được mã hóa và bảo vệ an toàn trong kho\n\n"
-        f"{vip_em('check', '✅')} <i>Khách hàng có thể bấm mua và nhận link tự động ngay lập tức!</i>"
+        f"└─ {vip_em('box', '📦')} <b>Tổng kho khả dụng:</b> <code>{total_stock}</code> link"
     )
 
 async def watch_and_notify_new_links(app: Application):

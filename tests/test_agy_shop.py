@@ -55,6 +55,14 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Số tài khoản", text)
         self.assertIn('emoji-id="6005570495603282482"', text)
 
+    def test_stock_notification_is_brief_and_uses_vip_emoji(self):
+        text = shop_bot.format_stock_added_notification(3, 294)
+        self.assertIn("+3", text)
+        self.assertIn("294", text)
+        self.assertIn('emoji-id="5924720918826848520"', text)
+        self.assertNotIn("Lọc trùng", text)
+        self.assertNotIn("Bảo hành", text)
+
     async def test_worker_delivers_only_orders_confirmed_paid(self):
         conn = shop_bot.get_db_connection()
         for code in ("TGSPAY1234", "TGSWAIT1234"):
