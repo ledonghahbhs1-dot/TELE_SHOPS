@@ -1,220 +1,156 @@
 import html
+import re
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Router, F, Bot
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-import config
-from database.db import db
-from utils.logger import logger
-from utils.vietqr import generate_memo, build_qr_url
-from utils.sepay_api import fetch_recent_transactions, find_matching_transaction
+from utils.delivery import DeliveryWorker
+from utils.wolfmod_api import WolfmodAPI
 
 router = Router(name="user_handlers")
 
 
-def format_vnd(amount: int) -> str:
-    return f"{amount:,} VND".replace(",", ".")
+def format_vnd(amount):
+    return f"{int(amount):,} VND".replace(",", ".")
 
 
-async def send_welcome(bot: Bot, chat_id: int):
-    stock = await db.count_available_links()
-    text = (
-        f"🎁 <b>{html.escape(config.PRODUCT_NAME)}</b>\n\n"
-        f"💰 <b>Price:</b> {format_vnd(config.PRICE_VND)} (~$1 USD) / link\n"
-        f"📦 <b>In stock:</b> {stock} link(s)\n\n"
-        f"Pay by bank transfer (VietQR), your link is delivered <b>automatically</b> "
-        f"right after payment is confirmed (usually within a minute)."
-    )
-    if stock > 0:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"🛒 Buy Now - {format_vnd(config.PRICE_VND)}", callback_data="buy")]
-        ])
-    else:
-        text += "\n\n⚠️ <b>Out of stock right now</b> - please check back later."
-        keyboard = None
-    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard)
-
-
-@router.message(Command("start"))
-async def cmd_start(message: Message, bot: Bot):
-    if message.chat.type != "private":
-        await send_private_shop_button(message, bot)
-        return
-    await send_welcome(bot, message.chat.id)
-
-
-@router.message(Command("buy"))
-async def cmd_buy(message: Message, bot: Bot):
-    if message.chat.type != "private":
-        await send_private_shop_button(message, bot)
-        return
-    await create_and_send_order(bot, message.chat.id, message.from_user)
-
-
-async def send_private_shop_button(message: Message, bot: Bot):
-    bot_user = await bot.get_me()
+async def private_shop_button(message, bot):
+    identity = await bot.get_me()
     await message.answer(
         "Bấm nút bên dưới để mua hàng và nhận link qua tin nhắn riêng.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Mua link", url=f"https://t.me/{bot_user.username}?start=shop")
+            InlineKeyboardButton(text="Mua link", url=f"https://t.me/{identity.username}?start=shop")
         ]]),
     )
 
 
+async def send_welcome(bot, user_id, shop):
+    product = await shop.product()
+    text = f"🎁 <b>{html.escape(product['name'])}</b>\n\nGiá: <b>{format_vnd(product['price_vnd'])}</b> / link\n"
+    if product.get("description"):
+        text += "\n" + html.escape(product["description"][:1500]) + "\n"
+    text += "\nThanh toán qua VietQR. Bot tự gửi link khi hệ thống xác nhận đã nhận tiền."
+    buttons = []
+    if product["in_stock"]:
+        buttons.append([InlineKeyboardButton(text="🛒 Mua ngay", callback_data="buy")])
+    else:
+        text += "\n\nSản phẩm hiện đã hết hàng."
+    buttons.append([InlineKeyboardButton(text="Đơn hàng của tôi", callback_data="my_orders")])
+    await bot.send_message(user_id, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.message(Command("start"))
+async def cmd_start(message: Message, bot: Bot, shop: WolfmodAPI):
+    if message.chat.type != "private":
+        await private_shop_button(message, bot)
+        return
+    await send_welcome(bot, message.from_user.id, shop)
+
+
+async def create_and_send_order(bot, user, shop, request_id):
+    result = await shop.create_order(user.id, user.username or "", request_id)
+    order, payment = result["order"], result["payment"]
+    expires = datetime.fromisoformat(order["expires_at"].replace("Z", "+00:00"))
+    expires = expires.astimezone(timezone(timedelta(hours=7))).strftime("%H:%M %d/%m/%Y")
+    code = order["order_code"]
+    caption = (
+        f"🧾 <b>Đơn hàng {html.escape(code)}</b>\n\n"
+        f"Số tiền: <b>{format_vnd(order['amount_vnd'])}</b>\n"
+        f"Ngân hàng: {html.escape(payment['bank_name'])}\n"
+        f"Số tài khoản: <code>{html.escape(payment['account_no'])}</code>\n"
+        f"Chủ tài khoản: {html.escape(payment['account_name'])}\n"
+        f"Nội dung chuyển khoản: <code>{html.escape(payment['transfer_note'])}</code>\n\n"
+        f"Hạn thanh toán: {expires} (giờ Việt Nam).\n"
+        "Chuyển đúng số tiền và giữ nguyên nội dung. Link sẽ được gửi riêng khi thanh toán được xác nhận."
+    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Tôi đã thanh toán — kiểm tra", callback_data=f"check:{code}")
+    ]])
+    try:
+        await bot.send_photo(user.id, photo=payment["qr_url"], caption=caption, reply_markup=keyboard)
+    except Exception:
+        await bot.send_message(user.id, caption, reply_markup=keyboard)
+
+
+@router.message(Command("buy"))
+async def cmd_buy(message: Message, bot: Bot, shop: WolfmodAPI):
+    if message.chat.type != "private":
+        await private_shop_button(message, bot)
+        return
+    await create_and_send_order(bot, message.from_user, shop, f"msg_{message.chat.id}_{message.message_id}")
+
+
+def is_private_callback(callback):
+    return bool(callback.message and callback.message.chat.type == "private" and
+                callback.message.chat.id == callback.from_user.id)
+
+
 @router.callback_query(F.data == "buy")
-async def on_buy_button(callback: CallbackQuery, bot: Bot):
-    if not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Vui lòng mua hàng trong tin nhắn riêng với bot.", show_alert=True)
+async def on_buy(callback: CallbackQuery, bot: Bot, shop: WolfmodAPI):
+    if not is_private_callback(callback):
+        await callback.answer("Vui lòng mở cuộc trò chuyện riêng với bot.", show_alert=True)
         return
     await callback.answer()
-    await create_and_send_order(bot, callback.message.chat.id, callback.from_user)
+    await create_and_send_order(bot, callback.from_user, shop, f"cb_{callback.id}")
 
 
-async def create_and_send_order(bot: Bot, chat_id: int, user):
-    stock = await db.count_available_links()
-    if stock <= 0:
-        await bot.send_message(chat_id, "⚠️ Sorry, we're out of stock right now. Please check back later.")
+async def show_orders(bot, user_id, shop):
+    orders = await shop.orders(user_id)
+    if not orders:
+        await bot.send_message(user_id, "Bạn chưa có đơn hàng nào.")
         return
-
-    memo = generate_memo()
-    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=config.ORDER_EXPIRE_MINUTES)
-    order_id = await db.create_order(
-        user_id=user.id,
-        username=user.username or "",
-        memo=memo,
-        amount=config.PRICE_VND,
-        expires_at=expires_at,
-    )
-    qr_url = build_qr_url(config.PRICE_VND, memo)
-
-    caption = (
-        f"🎁 <b>ORDER #{order_id}</b>\n\n"
-        f"💰 <b>Amount:</b> <code>{format_vnd(config.PRICE_VND)}</code>\n"
-        f"🏦 <b>Bank:</b> {html.escape(config.BANK_NAME)}\n"
-        f"👤 <b>Account Name:</b> {html.escape(config.ACCOUNT_NAME)}\n"
-        f"🔢 <b>Account Number:</b> <code>{html.escape(config.ACCOUNT_NO)}</code>\n"
-        f"📝 <b>Transfer Content (required):</b> <code>{html.escape(memo)}</code>\n\n"
-        f"⚠️ Scan the QR with your banking app, or transfer manually using the info above "
-        f"(the transfer content <b>must</b> match exactly, or the payment can't be matched). "
-        f"Your link is delivered <b>automatically</b> right after payment is confirmed.\n\n"
-        f"⏳ <i>This order expires in {config.ORDER_EXPIRE_MINUTES} minutes.</i>"
-    )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 I've Paid - Check Now", callback_data=f"check:{order_id}")]
-    ])
-
-    try:
-        await bot.send_photo(chat_id=chat_id, photo=qr_url, caption=caption, parse_mode="HTML", reply_markup=keyboard)
-    except Exception as e:
-        logger.error("Failed to send QR photo for order %s: %s", order_id, e)
-        await bot.send_message(chat_id, caption, parse_mode="HTML", reply_markup=keyboard)
-
-    logger.info("Order #%s created for user %s (memo=%s, amount=%s)", order_id, user.id, memo, config.PRICE_VND)
+    labels = {"pending": "Chờ thanh toán", "paid": "Đã thanh toán, đang giao", "delivered": "Đã giao",
+              "needs_review": "Đang kiểm tra", "cancelled": "Đã hủy", "refunded": "Đã hoàn tiền"}
+    lines = ["<b>Đơn hàng gần đây của bạn</b>\n"]
+    buttons = []
+    for order in orders:
+        code = order["order_code"]
+        lines.append(f"<code>{html.escape(code)}</code> · {format_vnd(order['amount_vnd'])} · "
+                     f"{labels.get(order['status'], 'Đang xử lý')}")
+        if order["status"] in ("pending", "paid"):
+            buttons.append([InlineKeyboardButton(text=f"Kiểm tra {code}", callback_data=f"check:{code}")])
+    await bot.send_message(user_id, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None)
 
 
-async def deliver_order(bot: Bot, order_id: int, chat_id: int, link: str):
-    text = (
-        f"✅ <b>PAYMENT CONFIRMED!</b>\n\n"
-        f"🎁 <b>Order #{order_id}</b> - here is your link:\n"
-        f"<code>{html.escape(link)}</code>\n\n"
-        f"⚠️ <i>This link is for you only and can only be used once. Do not share it.</i>"
-    )
-    await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
-    logger.info("Delivered link for order #%s to chat %s", order_id, chat_id)
+@router.message(Command("orders", "myorders"))
+async def cmd_orders(message: Message, bot: Bot, shop: WolfmodAPI):
+    if message.chat.type == "private":
+        await show_orders(bot, message.from_user.id, shop)
 
 
-async def try_confirm_order(bot: Bot, order_id: int) -> str:
-    """
-    Checks recent SePay transactions for a match against this order and, if found,
-    marks it paid + delivers the link. Returns a short status string for the caller
-    to relay back to the user: "delivered" | "already_delivered" | "not_found" | "no_match".
-    """
-    order = await db.get_order(order_id)
-    if not order:
-        return "not_found"
-
-    if order["status"] == "paid":
-        link = await db.get_delivered_link(order_id)
-        if link:
-            return "already_delivered"
-
-    if order["status"] != "pending":
-        return "no_match"
-
-    transactions = await fetch_recent_transactions()
-    match = find_matching_transaction(transactions, order["memo"], order["amount"])
-    if not match:
-        return "no_match"
-
-    won = await db.try_mark_order_paid(order_id, match["id"])
-    if not won:
-        # Someone else (the background poller) already confirmed it a moment ago.
-        return "already_delivered"
-
-    link = await db.claim_link_for_order(order_id, order["user_id"])
-    if not link:
-        logger.error("Order %s paid but no link available to deliver!", order_id)
-        await bot.send_message(
-            order["user_id"],
-            "✅ Your payment was received, but we're temporarily out of stock. "
-            "An admin will send your link shortly - sorry for the inconvenience!",
-        )
-        return "delivered"
-
-    await deliver_order(bot, order_id, order["user_id"], link)
-    return "delivered"
-
-
-async def poll_pending_orders(bot: Bot):
-    """Called periodically from main.py: batch-checks all pending orders against recent SePay transactions."""
-    expired = await db.expire_stale_orders()
-    if expired:
-        logger.info("Expired %s stale order(s)", expired)
-
-    pending = await db.get_pending_orders()
-    if not pending:
+@router.callback_query(F.data == "my_orders")
+async def on_my_orders(callback: CallbackQuery, bot: Bot, shop: WolfmodAPI):
+    if not is_private_callback(callback):
+        await callback.answer("Vui lòng mở cuộc trò chuyện riêng với bot.", show_alert=True)
         return
-
-    transactions = await fetch_recent_transactions()
-    if not transactions:
-        return
-
-    for order in pending:
-        match = find_matching_transaction(transactions, order["memo"], order["amount"])
-        if not match:
-            continue
-        won = await db.try_mark_order_paid(order["id"], match["id"])
-        if not won:
-            continue
-        link = await db.claim_link_for_order(order["id"], order["user_id"])
-        if not link:
-            logger.error("Order %s paid but no link available to deliver!", order["id"])
-            continue
-        try:
-            await deliver_order(bot, order["id"], order["user_id"], link)
-        except Exception as e:
-            logger.error("Failed to deliver order %s during background poll: %s", order["id"], e)
+    await callback.answer()
+    await show_orders(bot, callback.from_user.id, shop)
 
 
 @router.callback_query(F.data.startswith("check:"))
-async def on_check_button(callback: CallbackQuery, bot: Bot):
-    order_id = int(callback.data.split(":", 1)[1])
-    order = await db.get_order(order_id)
-    if not order or order["user_id"] != callback.from_user.id:
-        await callback.answer("Order not found.", show_alert=True)
+async def on_check(callback: CallbackQuery, bot: Bot, shop: WolfmodAPI, worker: DeliveryWorker):
+    if not is_private_callback(callback):
+        await callback.answer("Vui lòng mở cuộc trò chuyện riêng với bot.", show_alert=True)
         return
-    await callback.answer("🔍 Checking payment...")
-
-    result = await try_confirm_order(bot, order_id)
-    if result in ("delivered", "already_delivered"):
-        await callback.answer("✅ Payment confirmed! Check the message above for your link.", show_alert=True)
-    elif result == "not_found":
-        await callback.answer("❌ Order not found.", show_alert=True)
+    code = callback.data.split(":", 1)[1]
+    if not re.fullmatch(r"TGS?[A-Z0-9]{4,17}", code):
+        await callback.answer("Mã đơn không hợp lệ.", show_alert=True)
+        return
+    await callback.answer("Đang kiểm tra thanh toán…")
+    result = await shop.order(code, callback.from_user.id)
+    order = result["order"]
+    if order["status"] == "paid":
+        await worker.run_once(bot)
+        result = await shop.order(code, callback.from_user.id)
+        order = result["order"]
+    if order["status"] == "delivered":
+        text = "✅ Đơn đã được giao. Bạn xem tin nhắn chứa link trong cuộc trò chuyện này nhé."
+    elif order.get("expired"):
+        text = "Đơn đã hết hạn. Vui lòng tạo đơn mới bằng /buy."
+    elif order["status"] == "pending":
+        text = "Chưa nhận được xác nhận thanh toán. Vui lòng chờ một chút sau khi chuyển tiền."
     else:
-        order = await db.get_order(order_id)
-        if order and order["status"] == "expired":
-            await callback.answer("⌛ This order has expired. Please create a new one with /buy.", show_alert=True)
-        else:
-            await callback.answer("⏳ Payment not received yet. Please wait a minute after transferring and try again.", show_alert=True)
+        text = "Đơn đang được xử lý. Nếu đã chuyển tiền, bạn vui lòng chờ hoặc liên hệ quản trị viên."
+    await bot.send_message(callback.from_user.id, text)

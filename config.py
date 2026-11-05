@@ -1,48 +1,30 @@
 import os
-from pathlib import Path
-from typing import List
+from urllib.parse import urlsplit
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+OWNER_IDS = [int(value.strip()) for value in os.getenv("OWNER_IDS", "").split(",") if value.strip()]
+ALLOWED_GROUP_IDS = [int(value.strip()) for value in os.getenv("ALLOWED_GROUP_IDS", "").split(",") if value.strip()]
+WOLFMOD_API_URL = os.getenv("WOLFMOD_API_URL", "https://www.wolfmod.xyz").rstrip("/")
+WOLFMOD_API_SECRET = os.getenv("WOLFMOD_API_SECRET", "").strip()
+PRODUCT_SKU = os.getenv("PRODUCT_SKU", "gemini_plus").strip()
+POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "15"))
 
-BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 
-raw_owners = os.getenv("OWNER_IDS", "")
-OWNER_IDS: List[int] = [
-    int(x.strip()) for x in raw_owners.split(",") if x.strip().lstrip("-").isdigit()
-]
-
-# Empty means no groups are allowed. Private customer chats remain available.
-ALLOWED_GROUP_IDS: List[int] = [
-    int(value.strip())
-    for value in os.getenv("ALLOWED_GROUP_IDS", "").split(",")
-    if value.strip()
-]
-if any(chat_id >= 0 for chat_id in ALLOWED_GROUP_IDS):
-    raise ValueError("ALLOWED_GROUP_IDS must contain negative Telegram group IDs")
-
-DATABASE_PATH: str = os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "shop.db"))
-
-# --- Product ---
-PRODUCT_NAME: str = os.getenv("PRODUCT_NAME", "Gemini / Google One Offer Link")
-PRICE_VND: int = int(os.getenv("PRICE_VND", 25000))  # 25,000 VND (~$1 USD) per link
-ORDER_EXPIRE_MINUTES: int = int(os.getenv("ORDER_EXPIRE_MINUTES", 15))
-
-# --- VietQR bank details (same account already used for wolfmod.xyz VIP keys) ---
-BANK_BIN: str = os.getenv("BANK_BIN", "970416")  # ACB
-BANK_NAME: str = os.getenv("BANK_NAME", "ACB")
-ACCOUNT_NO: str = os.getenv("ACCOUNT_NO", "68986683")
-ACCOUNT_NAME: str = os.getenv("ACCOUNT_NAME", "LE DONG HA")
-
-# --- SePay (transaction lookup API, used to auto-confirm bank transfers) ---
-SEPAY_API_BASE_URL: str = os.getenv("SEPAY_API_BASE_URL", "https://my.sepay.vn/userapi")
-SEPAY_API_TOKEN: str = os.getenv("SEPAY_API_TOKEN", "")
-
-# Background poller interval for matching pending orders against new SePay transactions
-POLL_INTERVAL_SEC: int = int(os.getenv("POLL_INTERVAL_SEC", 15))
-
-# Path to a newline-delimited .txt file used to seed the initial link inventory
-# (only read once, by seed_links.py - not touched at runtime by the bot)
-SEED_LINKS_FILE: str = os.getenv("SEED_LINKS_FILE", str(BASE_DIR / "seed_links.txt"))
+def validate():
+    if not BOT_TOKEN:
+        raise ValueError("Set BOT_TOKEN using the new token from BotFather")
+    if len(WOLFMOD_API_SECRET) < 32:
+        raise ValueError("WOLFMOD_API_SECRET must match TG_BOT_API_SECRET on Vercel (at least 32 characters)")
+    url = urlsplit(WOLFMOD_API_URL)
+    if url.scheme != "https" or not url.hostname or url.username or url.password or url.path or url.query or url.fragment:
+        raise ValueError("WOLFMOD_API_URL must be an HTTPS origin, for example https://www.wolfmod.xyz")
+    if not OWNER_IDS or any(owner <= 0 for owner in OWNER_IDS):
+        raise ValueError("Set OWNER_IDS to positive Telegram user IDs")
+    if any(group >= 0 for group in ALLOWED_GROUP_IDS):
+        raise ValueError("ALLOWED_GROUP_IDS must contain negative Telegram group IDs")
+    if not 5 <= POLL_INTERVAL_SEC <= 300:
+        raise ValueError("POLL_INTERVAL_SEC must be between 5 and 300")

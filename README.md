@@ -1,61 +1,78 @@
-# TELE_SHOP
+# TELE_SHOPS — shared Wolfmod store
 
-Telegram bot that sells single-use links (e.g. Google One / Gemini offer links) for a fixed price, paid via VietQR bank transfer and auto-confirmed through the SePay transaction API.
+Telegram storefront for the existing Wolfmod database and admin dashboard.
+Prices, products, inventory, payments, orders and delivery receipts are stored by
+Wolfmod. The bot uses signed HTTPS requests; it never connects directly to Supabase.
 
-## How it works
+## Railway variables
 
-1. User sends `/start` (or `/buy`) in a private chat with the bot.
-2. Bot creates an order with a unique transfer memo (`GEM123456`) and shows a VietQR payment QR code.
-3. A background task polls the SePay API every `POLL_INTERVAL_SEC` seconds, matching incoming transfers (by memo + amount) against pending orders.
-4. On a match, the order is marked paid, one available link is atomically claimed from inventory, and it's DM'd to the buyer automatically. The buyer can also tap "I've Paid - Check Now" for an immediate check.
+Copy `.env.example` into Railway Variables and fill in:
 
-## Setup
+| Variable | Value |
+| --- | --- |
+| `BOT_TOKEN` | New token from BotFather; revoke the old exposed token first. |
+| `OWNER_IDS` | Your Telegram user ID; comma-separated for several owners. |
+| `WOLFMOD_API_SECRET` | Same secret as `TG_BOT_API_SECRET` on Wolfmod Vercel; at least 32 characters. |
+| `WOLFMOD_API_URL` | `https://www.wolfmod.xyz` |
+| `PRODUCT_SKU` | `gemini_plus` |
+| `ALLOWED_GROUP_IDS` | Your negative group ID, for example `-1001234567890`; empty rejects all groups. |
+| `POLL_INTERVAL_SEC` | `15` |
 
-1. `pip install -r requirements.txt`
-2. Copy `.env.example` to `.env` and fill in `BOT_TOKEN`, `OWNER_IDS`, and `SEPAY_API_TOKEN`.
-3. Seed the initial inventory from a `.txt` file (one link per line, invalid/blank lines are skipped automatically):
-   ```
-   python seed_links.py "C:\path\to\your\links.txt"
-   ```
-   Run this again any time you want to add more stock - duplicates are skipped.
-4. `python main.py`
+Deploy using the included Dockerfile with **one replica**. No port, domain, Volume,
+SQLite, Supabase connection string, price, or SePay API token is needed on Railway.
+Copy `.env.example` to `.env` for local use, install `requirements.txt`, and run `python main.py`.
 
-## Admin commands (owner only, set via `OWNER_IDS`)
+## Wolfmod configuration
 
-Inventory commands are accepted only in private chat to avoid exposing stock links in groups.
+Set `TG_BOT_API_SECRET` on Vercel to match Railway's `WOLFMOD_API_SECRET`, then redeploy.
+The website's existing authenticated SePay webhook confirms payments in `tg_orders`.
+Keep the receiving bank account synchronized with SePay. Default receiving details
+match the existing Wolfmod account; optional Vercel overrides are `TG_BANK_BIN`,
+`TG_BANK_NAME`, `TG_ACCOUNT_NO`, `TG_ACCOUNT_NAME`.
 
-- `/stock` - shows available vs. sold count.
-- `/orders` - shows the 20 most recent orders and their status.
-- `/addlinks` - reply to a `.txt` file attachment, or `/addlinks <link1>\n<link2>...`, to top up inventory without restarting the bot.
+`TG_SALES_BOT_TOKEN` on Vercel is optional for automated delivery by this bot.
+Set it to the same new Telegram token if you also use dashboard manual delivery or
+the website's Telegram payment notifications. Never use an admin session/password
+as the bot's API credential.
 
-## Railway deployment
+Manage inventory, active products and prices at:
+https://www.wolfmod.xyz/m7k9xq2r/dashboard#tg-sales
 
-Deploy this repository as a Dockerfile service with **one replica** (Telegram long polling).
-No domain or PORT is required. Attach a Railway Volume at `/app/data` and set
-`DATABASE_PATH=/app/data/shop.db` so inventory and orders survive redeployments.
+## Customer flow
 
-Set `BOT_TOKEN`, `OWNER_IDS`, `SEPAY_API_TOKEN` and `ALLOWED_GROUP_IDS` in Railway Variables.
-Check `PRODUCT_NAME`, `PRICE_VND`, `BANK_BIN`, `BANK_NAME`, `ACCOUNT_NO`, `ACCOUNT_NAME`
-against your product and receiving bank account. Optional settings and defaults are in `.env.example`.
-After deployment, start the bot privately as an owner and add stock using `/addlinks`.
+1. `/start` reads the active product and current price from Wolfmod.
+2. `/buy` creates a server-priced, idempotent order in the shared dashboard and shows
+   its VietQR QR code with the server's `TGS…` bank-transfer memo.
+3. SePay's existing webhook marks that order paid. Clicking “I've paid” only queries
+   the server; it cannot confirm or change payment status.
+4. The bot polls the database-backed delivery queue. A transaction reserves stock
+   for that paid order; only after Telegram accepts the message does a signed receipt
+   mark the dashboard order delivered.
+5. `/orders` or `/myorders` shows only the sender's orders.
 
-## Restricting groups
+Orders and unfinished deliveries survive Railway restarts. A lost receipt is retried
+without allocating another link. If the process crashes after Telegram accepts a
+message but before the receipt is stored, the same purchased links may be resent after
+the two-minute lease expires; inventory is not allocated twice.
 
-- Set `ALLOWED_GROUP_IDS` to your group ID (e.g. `-1001234567890`), or a comma-separated list.
-  Empty means the bot leaves all groups. Private customer conversations remain open.
-- Start the bot privately from your owner account first. If you don't know the group ID,
-  add the bot to the group once: it will leave and send the ID privately to every configured owner.
-  Set that ID on Railway, redeploy, then add the bot again.
-- In an approved group, an owner can use `/chatid`. `/start` and `/buy` show a button
-  opening the bot privately so payment details and purchased links stay private.
-- Promote the bot to administrator manually in Telegram. It cannot promote itself.
-  Selling links needs no delete/ban/promote permissions. Group moderation is not implemented.
-- After adding it to your group, use BotFather `/setjoingroups` -> select this bot -> Disable
-  to stop new group additions at Telegram's level. Re-enable temporarily if you need to add it again.
-  The allowlist also makes the bot leave other groups when membership/message updates arrive.
-- If Telegram upgrades your group to a supergroup and changes its ID, update the allowlist.
+## Owner and groups
 
-## Notes
+- `/stock`: count the shared inventory, only in the owner's private chat.
+- `/dashboard` and `/addlinks`: open the existing admin dashboard. Upload stock there;
+  there is no second inventory or Telegram-based bulk export/import.
+- Start the bot privately as an owner before adding it to a group. If an unknown
+  group adds it, the bot leaves and privately sends its ID to the owner. Put that ID
+  in `ALLOWED_GROUP_IDS`, redeploy Railway, then add the bot again.
+- Promote the bot manually in your group. `/start` or `/buy` there opens a private
+  customer conversation. The bot does not implement member moderation.
+- After adding it to your group, BotFather `/setjoingroups` → Disable prevents new
+  group additions. The allowlist also rejects unapproved groups.
 
-- Never commit a real inventory `.txt` file to this repo (`seed_links.txt` is gitignored) - the links themselves are the product.
-- The SePay transaction API field names in `utils/sepay_api.py` are best-effort and have not been verified against a live account from this environment - test with one real small transfer after deploying, and check the logs if a payment isn't auto-detected.
+## Migration and tests
+
+The previous SQLite implementation is no longer used. Existing ignored local data
+files are not uploaded or migrated automatically; the Wolfmod inventory is the source
+of truth. Do not run the previous standalone SQLite deployment at the same time.
+
+Run `python -m unittest discover -s tests -v`. Tests use local HTTP fixtures and mocked
+Telegram delivery, without real payments, customer messages, or production stock.
