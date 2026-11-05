@@ -76,6 +76,15 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   transaction ID. The customer must press the bot's payment-check button to
   trigger the delivery flow. Do not replace this reference with a fabricated
   SePay transaction ID.
+- Admin supplied SePay transaction list: `96509305` / `TGSE6F70932` and
+  `96426765` / `TGSB74D2E96` were incoming 20,000 VND, but SePay showed no
+  recognized payment code or webhook for either. The recognized examples
+  `TGS37939776` and `TGS20000841` begin with digits after TGS. Investigate
+  SePay's payment-code pattern and webhook filters: TGS suffixes can include
+  A-F as well as digits. Based on the admin's confirmation and supplied SePay
+  transaction, `TGSB74D2E96` was manually marked paid with reference
+  `96426765`; paid_at is the manual reconciliation time. Verify delivery via
+  the customer payment-check flow. Do not duplicate delivery.
 - Plisio diagnosis 2026-11-05: production has `PLISIO_SECRET_KEY` configured,
   `gemini_plus` is active at 1.00 USDT, and 294 links are available. No Telegram
   Plisio invoice rows exist. Railway previously logged only `HTTPError` when
