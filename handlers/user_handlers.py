@@ -40,6 +40,7 @@ async def send_welcome(bot: Bot, chat_id: int):
 @router.message(Command("start"))
 async def cmd_start(message: Message, bot: Bot):
     if message.chat.type != "private":
+        await send_private_shop_button(message, bot)
         return
     await send_welcome(bot, message.chat.id)
 
@@ -47,12 +48,26 @@ async def cmd_start(message: Message, bot: Bot):
 @router.message(Command("buy"))
 async def cmd_buy(message: Message, bot: Bot):
     if message.chat.type != "private":
+        await send_private_shop_button(message, bot)
         return
     await create_and_send_order(bot, message.chat.id, message.from_user)
 
 
+async def send_private_shop_button(message: Message, bot: Bot):
+    bot_user = await bot.get_me()
+    await message.answer(
+        "Bấm nút bên dưới để mua hàng và nhận link qua tin nhắn riêng.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Mua link", url=f"https://t.me/{bot_user.username}?start=shop")
+        ]]),
+    )
+
+
 @router.callback_query(F.data == "buy")
 async def on_buy_button(callback: CallbackQuery, bot: Bot):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer("Vui lòng mua hàng trong tin nhắn riêng với bot.", show_alert=True)
+        return
     await callback.answer()
     await create_and_send_order(bot, callback.message.chat.id, callback.from_user)
 
@@ -186,6 +201,10 @@ async def poll_pending_orders(bot: Bot):
 @router.callback_query(F.data.startswith("check:"))
 async def on_check_button(callback: CallbackQuery, bot: Bot):
     order_id = int(callback.data.split(":", 1)[1])
+    order = await db.get_order(order_id)
+    if not order or order["user_id"] != callback.from_user.id:
+        await callback.answer("Order not found.", show_alert=True)
+        return
     await callback.answer("🔍 Checking payment...")
 
     result = await try_confirm_order(bot, order_id)

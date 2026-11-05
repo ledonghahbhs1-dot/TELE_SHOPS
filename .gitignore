@@ -1,6 +1,8 @@
 # Environment variables
 .env
 .env.local
+.env.*
+!.env.example
 
 # Seed inventory files (contain real unclaimed purchase links - never commit)
 seed_links.txt
@@ -37,6 +39,8 @@ venv.bak/
 
 # SQLite databases
 *.db
+*.db-*
+*.sqlite
 *.sqlite3
 data/*.db
 

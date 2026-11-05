@@ -7,6 +7,7 @@ import config
 from database.db import db
 from utils.logger import logger
 from handlers.admin_handlers import router as admin_router
+from handlers.group_handlers import router as group_router, GroupAccessMiddleware
 from handlers.user_handlers import router as user_router, poll_pending_orders
 
 
@@ -32,6 +33,10 @@ async def main():
     bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
+    for observer in (dp.message, dp.callback_query, dp.channel_post):
+        observer.outer_middleware(GroupAccessMiddleware())
+
+    dp.include_router(group_router)
     dp.include_router(admin_router)
     dp.include_router(user_router)
 
@@ -52,7 +57,7 @@ async def main():
     print("=" * 50 + "\n")
 
     try:
-        await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await bot.session.close()
         logger.info("Bot stopped gracefully.")

@@ -22,9 +22,38 @@ Telegram bot that sells single-use links (e.g. Google One / Gemini offer links) 
 
 ## Admin commands (owner only, set via `OWNER_IDS`)
 
+Inventory commands are accepted only in private chat to avoid exposing stock links in groups.
+
 - `/stock` - shows available vs. sold count.
 - `/orders` - shows the 20 most recent orders and their status.
 - `/addlinks` - reply to a `.txt` file attachment, or `/addlinks <link1>\n<link2>...`, to top up inventory without restarting the bot.
+
+## Railway deployment
+
+Deploy this repository as a Dockerfile service with **one replica** (Telegram long polling).
+No domain or PORT is required. Attach a Railway Volume at `/app/data` and set
+`DATABASE_PATH=/app/data/shop.db` so inventory and orders survive redeployments.
+
+Set `BOT_TOKEN`, `OWNER_IDS`, `SEPAY_API_TOKEN` and `ALLOWED_GROUP_IDS` in Railway Variables.
+Check `PRODUCT_NAME`, `PRICE_VND`, `BANK_BIN`, `BANK_NAME`, `ACCOUNT_NO`, `ACCOUNT_NAME`
+against your product and receiving bank account. Optional settings and defaults are in `.env.example`.
+After deployment, start the bot privately as an owner and add stock using `/addlinks`.
+
+## Restricting groups
+
+- Set `ALLOWED_GROUP_IDS` to your group ID (e.g. `-1001234567890`), or a comma-separated list.
+  Empty means the bot leaves all groups. Private customer conversations remain open.
+- Start the bot privately from your owner account first. If you don't know the group ID,
+  add the bot to the group once: it will leave and send the ID privately to every configured owner.
+  Set that ID on Railway, redeploy, then add the bot again.
+- In an approved group, an owner can use `/chatid`. `/start` and `/buy` show a button
+  opening the bot privately so payment details and purchased links stay private.
+- Promote the bot to administrator manually in Telegram. It cannot promote itself.
+  Selling links needs no delete/ban/promote permissions. Group moderation is not implemented.
+- After adding it to your group, use BotFather `/setjoingroups` -> select this bot -> Disable
+  to stop new group additions at Telegram's level. Re-enable temporarily if you need to add it again.
+  The allowlist also makes the bot leave other groups when membership/message updates arrive.
+- If Telegram upgrades your group to a supergroup and changes its ID, update the allowlist.
 
 ## Notes
 

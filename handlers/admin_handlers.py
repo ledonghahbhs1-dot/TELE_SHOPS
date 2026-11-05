@@ -9,6 +9,7 @@ from database.db import db
 from utils.logger import logger
 
 router = Router(name="admin_handlers")
+router.message.filter(F.chat.type == "private")
 
 
 def is_owner(user) -> bool:

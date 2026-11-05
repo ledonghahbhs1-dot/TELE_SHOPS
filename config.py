@@ -14,6 +14,15 @@ OWNER_IDS: List[int] = [
     int(x.strip()) for x in raw_owners.split(",") if x.strip().lstrip("-").isdigit()
 ]
 
+# Empty means no groups are allowed. Private customer chats remain available.
+ALLOWED_GROUP_IDS: List[int] = [
+    int(value.strip())
+    for value in os.getenv("ALLOWED_GROUP_IDS", "").split(",")
+    if value.strip()
+]
+if any(chat_id >= 0 for chat_id in ALLOWED_GROUP_IDS):
+    raise ValueError("ALLOWED_GROUP_IDS must contain negative Telegram group IDs")
+
 DATABASE_PATH: str = os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "shop.db"))
 
 # --- Product ---
