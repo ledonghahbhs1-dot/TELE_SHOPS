@@ -321,9 +321,17 @@ def deliver_product(order_id, user_id):
     cursor = conn.cursor()
 
     order = cursor.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
-    if not order or order["status"] == "completed":
+    if not order:
         conn.close()
         return None
+
+    if int(order["user_id"]) != int(user_id):
+        conn.close()
+        return None
+    if order["status"] == "completed":
+        links = (order["item_delivered"] or "").splitlines()
+        conn.close()
+        return links or None
 
     qty = 1
     if "quantity" in order.keys() and order["quantity"]:
@@ -332,9 +340,6 @@ def deliver_product(order_id, user_id):
         except Exception:
             qty = 1
 
-    if int(order["user_id"]) != int(user_id):
-        conn.close()
-        return None
     # The web claims the complete quantity atomically and returns the same bundle on retries.
     bundle = claim_stock_from_web(order["product_id"], order_id)
     delivered_links = bundle.splitlines() if bundle else []
@@ -1287,8 +1292,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Đơn hàng không tồn tại!", show_alert=True)
             return
 
+        if int(order["user_id"]) != int(user_id):
+            await query.answer("❌ Đơn hàng không tồn tại!", show_alert=True)
+            return
+
         if order["status"] == "completed":
-            await query.answer("✅ Đơn hàng này đã được bàn giao trước đó!", show_alert=True)
+            links = (order["item_delivered"] or "").splitlines()
+            if links:
+                msg_body, link_buttons = format_delivered_links_message(order_id, links)
+                await query.message.reply_text(msg_body, reply_markup=InlineKeyboardMarkup(link_buttons), parse_mode="HTML")
+            await query.answer("✅ Đơn hàng đã được bàn giao.", show_alert=True)
             return
 
         # Kiểm tra nếu đơn hàng đã bị hủy hoặc hết hạn

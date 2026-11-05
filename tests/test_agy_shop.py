@@ -80,7 +80,8 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         conn.close()
         with patch.object(shop_bot,"claim_stock_from_web",return_value="https://fixture/one\nhttps://fixture/two") as claim:
             self.assertEqual(shop_bot.deliver_product("TGSBUNDLE",123),["https://fixture/one","https://fixture/two"])
-            self.assertIsNone(shop_bot.deliver_product("TGSBUNDLE",123))
+            self.assertEqual(shop_bot.deliver_product("TGSBUNDLE",123),["https://fixture/one","https://fixture/two"])
+            self.assertIsNone(shop_bot.deliver_product("TGSBUNDLE",999))
             claim.assert_called_once()
 
     async def test_database_reinitialization_preserves_order_and_never_imports_local_links(self):
