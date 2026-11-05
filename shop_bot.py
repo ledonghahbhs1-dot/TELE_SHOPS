@@ -1312,7 +1312,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_edit_or_reply(
                 query,
                 f"{vip_em('cross', '❌')} <b>ĐƠN HÀNG <code>{order_id}</code> ĐÃ HẾT HẠN THANH TOÁN!</b>\n\n"
-                f"{vip_em('calendar', '⏳')} Thời gian chờ 10 phút cho đơn hàng đã kết thúc và đơn đã được tự động hủy.\n\n"
+                f"{vip_em('calendar', '⏳')} Thời gian chờ 10 phút cho đơn hàng đã kết thúc và đơn đã được tự động hủy. Nếu đã chuyển khoản, vui lòng liên hệ @wolfmodyt để được hỗ trợ.\n\n"
                 f"{vip_em('lightning', '⚡️')} <i>Quý Khách vui lòng tạo đơn hàng mới:</i>",
                 reply_markup=InlineKeyboardMarkup([[vip_btn("Đặt Mua Đơn Mới", callback_data="buy_gemini_plus", emoji_name="crown", style="primary")]]),
                 parse_mode="HTML"
@@ -1344,7 +1344,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_edit_or_reply(
                 query,
                 f"{vip_em('cross', '❌')} <b>ĐƠN HÀNG <code>{order_id}</code> ĐÃ HẾT HẠN THANH TOÁN!</b>\n\n"
-                f"{vip_em('calendar', '⏳')} Đơn hàng chỉ có hiệu lực trong <b>10 phút</b>. Đơn này đã quá hạn và hệ thống đã hủy đơn.\n\n"
+                f"{vip_em('calendar', '⏳')} Đơn hàng chỉ có hiệu lực trong <b>10 phút</b>. Đơn này đã quá hạn và hệ thống đã hủy đơn. Nếu đã chuyển khoản, vui lòng liên hệ @wolfmodyt để được hỗ trợ.\n\n"
                 f"{vip_em('lightning', '⚡️')} <i>Quý Khách vui lòng tạo đơn mới để nhận mã QR chuyển khoản hợp lệ:</i>",
                 reply_markup=InlineKeyboardMarkup([[vip_btn("Đặt Mua Đơn Mới", callback_data="buy_gemini_plus", emoji_name="crown", style="primary")]]),
                 parse_mode="HTML"
@@ -1387,56 +1387,25 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         pass
                 return
 
-        pay_method = order["payment_method"] if "payment_method" in order.keys() and order["payment_method"] else "vietqr"
-        if pay_method == "usdt":
-            method_desc = "USDT qua Plisio"
-            usdt_unit = float(get_setting("usdt_price", "1"))
-            total_usdt = round(usdt_unit * qty, 2)
-            total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
-            amt_display = f"{total_usdt_str} USDT ({get_setting('usdt_network', 'BEP20')})"
+        status = web_stat.get("status")
+        if status in ("paid", "delivered"):
+            notice = "<b>Thanh toán đã được xác nhận nhưng link chưa sẵn sàng.</b>"
+        elif status == "pending" or status == "not_found" or web_stat.get("found") is False:
+            notice = "<b>Hệ thống chưa nhận được thanh toán cho đơn hàng này.</b>"
         else:
-            method_desc = "VietQR ACB"
-            amt_display = f"{order['amount']:,} VNĐ"
-
-        await query.answer("✅ Đã ghi nhận! Bot đang kiểm tra giao dịch và chuyển cho Admin...", show_alert=True)
+            notice = "<b>Hiện chưa kiểm tra được trạng thái thanh toán.</b>"
         await query.message.reply_text(
-            f"{vip_em('star', '⏳')} <b>Đơn hàng VIP <code>{order_id}</code> đang được hệ thống đối soát.</b>\n"
-            f"Hệ thống đang kiểm tra giao dịch <b>{method_desc}</b> qua hệ thống thanh toán. Bot sẽ tự động xuất link VIP gửi cho bạn ngay khi tiền vào tài khoản hoặc Admin bấm duyệt!\n\n"
-            f"{vip_em('calendar', '⏳')} <i>Thời hạn thanh toán: 10 phút kể từ lúc tạo đơn.</i>",
-            reply_markup=InlineKeyboardMarkup([[vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]]),
-            parse_mode="HTML"
+            f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>KIỂM TRA THANH TOÁN VIP</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
+            f"{vip_em('tag')} <b>Mã đơn:</b> <code>{html.escape(order_id)}</code>\n\n"
+            f"{vip_em('shield')} {notice}\n\n"
+            f"{vip_em('chat')} Nếu bạn đã chuyển khoản, vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.\n"
+            f"{vip_em('calendar')} Nếu chưa chuyển, hãy thanh toán theo hóa đơn rồi bấm kiểm tra lại.",
+            reply_markup=InlineKeyboardMarkup([
+                [vip_btn("Kiểm Tra Thanh Toán", callback_data=f"confirm_pay_{order_id}", emoji_name="refresh", style="primary")],
+                [vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")],
+                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+            ]), parse_mode="HTML"
         )
-
-        # Gửi thông báo đến Admin nếu có ADMIN_ID kèm nút duyệt và link web dashboard
-        if ADMIN_ID and str(ADMIN_ID).isdigit():
-            admin_notify = (
-                f"{vip_em('crown', '👑')} <b>CÓ ĐƠN HÀNG VIP MỚI CẦN DUYỆT!</b>\n\n"
-                f"{vip_em('tag', '🆔')} <b>Đơn:</b> <code>{order_id}</code>\n"
-                f"{vip_em('user', '👤')} <b>Khách VIP:</b> {user.mention_html()} (ID: <code>{user_id}</code>)\n"
-                f"{vip_em('box', '📦')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-                f"{vip_em('card', '💳')} <b>Phương thức:</b> <b>{method_desc}</b>\n"
-                f"{vip_em('money', '💵')} <b>Số tiền:</b> <code>{amt_display}</code>\n"
-                f"{vip_em('memo', '📝')} <b>Nội dung CK/Memo:</b> <code>{order_id}</code>\n"
-                f"{vip_em('calendar', '⏳')} <b>Thời hạn:</b> 10 phút"
-            )
-            admin_kb = [
-                [
-                    vip_btn("👑 Duyệt & Bắn Link VIP", callback_data=f"admin_approve_{order_id}", emoji_name="crown", style="success"),
-                    vip_btn("❌ Từ chối", callback_data=f"admin_reject_{order_id}", emoji_name="cross", style="danger")
-                ],
-                [
-                    vip_btn("🌐 Kiểm Tra Trên Web Dashboard", url="https://www.wolfmod.xyz/m7k9xq2r/dashboard#tg-sales", emoji_name="globe")
-                ]
-            ]
-            try:
-                await context.bot.send_message(
-                    chat_id=int(ADMIN_ID),
-                    text=admin_notify,
-                    reply_markup=InlineKeyboardMarkup(admin_kb),
-                    parse_mode="HTML"
-                )
-            except Exception as e_adm:
-                logger.error(f"Không thể gửi thông báo cho Admin: {e_adm}")
 
     elif data.startswith("cancel_order_"):
         order_id = data.replace("cancel_order_", "")

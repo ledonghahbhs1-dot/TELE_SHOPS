@@ -102,6 +102,27 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
             shop_bot.init_database()
         self.assertEqual(shop_bot.get_setting("usdt_wallet"), wallet)
 
+    async def test_unconfirmed_payment_informs_customer_without_messaging_admin(self):
+        conn = shop_bot.get_db_connection()
+        conn.execute("INSERT INTO orders(order_id,user_id,product_id,amount,quantity,expires_at) VALUES ('TGSWAIT01',123,'gemini_plus',20000,1,'2099-01-01 00:00:00')")
+        conn.commit()
+        conn.close()
+        for status, expected in (({"status": "pending"}, "chưa nhận được thanh toán"),
+                                 ({}, "chưa kiểm tra được"),
+                                 ({"status": "paid"}, "đã được xác nhận")):
+            message = SimpleNamespace(reply_text=AsyncMock())
+            query = SimpleNamespace(data="confirm_pay_TGSWAIT01", answer=AsyncMock(), message=message)
+            update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
+            context = SimpleNamespace(bot=SimpleNamespace(send_message=AsyncMock()))
+            with patch.object(shop_bot, "check_web_order_status", return_value=status), \
+                 patch.object(shop_bot, "deliver_product", return_value=None):
+                await shop_bot.callback_handler(update, context)
+            text = message.reply_text.await_args.args[0]
+            self.assertIn(expected, text)
+            self.assertIn("@wolfmodyt", text)
+            self.assertIn('emoji-id="5886666250158870040"', text)
+            context.bot.send_message.assert_not_awaited()
+
     async def test_vietqr_checkout_creates_quantity_and_ten_minute_expiry(self):
         query = SimpleNamespace(data="create_order_vietqr_2", answer=AsyncMock(),
                                 message=SimpleNamespace(reply_photo=AsyncMock(), delete=AsyncMock()))

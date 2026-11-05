@@ -30,6 +30,9 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   invoice transaction ID, currency and amount before marking the order paid.
   Late payments are marked `needs_review`. The customer presses the bot's check
   button to trigger the original AGY delivery flow.
+- An unconfirmed payment check informs the buyer to contact @wolfmodyt if already
+  paid, using AGY custom emoji IDs. It must not send a reconciliation alert to the
+  admin; provider errors and confirmed payments awaiting stock have distinct text.
 - The web claims the entire paid quantity atomically. The bot persists the bundle
   locally, and only the order owner can request it again after interruption.
 - Never assert that web and bot changes preserve all orders without exercising
