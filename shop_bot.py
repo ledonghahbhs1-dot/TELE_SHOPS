@@ -2060,6 +2060,10 @@ def run_shop_bot(token=None):
 
     async def post_init_hook(application: Application):
         # asyncio.create_task(watch_and_notify_new_links(application)) # TẮT HOÀN TOÀN THEO YÊU CẦU USER
+        conn = get_db_connection()
+        awaiting = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE status = 'completed' AND delivery_notified_at IS NULL").fetchone()["n"]
+        conn.close()
+        logger.info("Số đơn đã cấp link đang chờ gửi Telegram: %s", awaiting)
         asyncio.create_task(auto_cancel_expired_orders_task(application))
         asyncio.create_task(auto_deliver_paid_orders_task(application))
 
