@@ -966,6 +966,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
+class PlisioMinimumAmountError(Exception):
+    def __init__(self, minimum, currency):
+        self.minimum = minimum
+        self.currency = currency
+        super().__init__("Plisio minimum amount")
+
+
 def create_web_plisio_invoice(order_id, user, qty):
     import json
     import re
@@ -980,12 +987,19 @@ def create_web_plisio_invoice(order_id, user, qty):
         with urllib.request.urlopen(req, timeout=25) as response:
             invoice = json.loads(response.read())
     except urllib.error.HTTPError as error:
+        minimum = None
+        minimum_currency = None
         try:
             body = json.loads(error.read(2048).decode("utf-8", errors="replace"))
             error_code = body.get("error", "request_rejected")
             if not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code):
                 error_code = "request_rejected"
             provider_code = body.get("provider_code")
+            value, currency = body.get("minimum_exclusive"), body.get("minimum_currency")
+            if (str(provider_code) == "106" and not isinstance(value, bool) and
+                isinstance(value, (int, float)) and 0 < value <= 1000000 and
+                currency in ("USDT_BSC", "USDT_TRX")):
+                minimum, minimum_currency = float(value), currency
             if isinstance(provider_code, (int, str)) and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(provider_code)):
                 error_code = f"{error_code}_provider_{provider_code}"
             provider_status = body.get("provider_http_status")
@@ -993,6 +1007,8 @@ def create_web_plisio_invoice(order_id, user, qty):
                 error_code = f"{error_code}_http_{provider_status}"
         except Exception:
             error_code = "request_rejected"
+        if minimum is not None:
+            raise PlisioMinimumAmountError(minimum, minimum_currency) from None
         raise RuntimeError(f"HTTP {error.code}: {error_code}") from None
     url = urlsplit(invoice.get("invoice_url", ""))
     if not invoice.get("success") or url.scheme != "https" or url.username or url.password or not (
@@ -1012,6 +1028,16 @@ async def show_plisio_checkout(query, user, qty, order_id=None):
         order_id = "TGS" + hashlib.sha256(reference.encode()).hexdigest()[:12].upper()
     try:
         invoice = await asyncio.to_thread(create_web_plisio_invoice, order_id, user, qty)
+    except PlisioMinimumAmountError as error:
+        network = "BEP20 (BSC)" if error.currency == "USDT_BSC" else "TRC20"
+        await safe_edit_or_reply(query,
+            f"{vip_em('shield')} <b>Plisio yêu cầu hóa đơn lớn hơn {error.minimum:g} USDT trên mạng {network}.</b>\n\n"
+            f"{vip_em('lightning')} Vui lòng chọn VietQR hoặc tăng số lượng để tổng tiền vượt mức này.",
+            reply_markup=InlineKeyboardMarkup([
+                [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=f"select_qty_{qty}", emoji_name="refresh", style="primary")],
+                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+            ]), parse_mode="HTML")
+        return
     except Exception as error:
         message = str(error)
         safe_error = message if re.fullmatch(r"HTTP [0-9]{3}: [a-z0-9_]{1,64}", message) else type(error).__name__
@@ -1043,7 +1069,7 @@ async def show_plisio_checkout(query, user, qty, order_id=None):
         f"{vip_em('tag')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
         f"{vip_em('box')} <b>Số lượng:</b> <b>{qty} link</b>\n"
         f"{vip_em('money')} <b>Số tiền thanh toán:</b> <code>{total:g} USDT</code>\n"
-        f"{vip_em('globe')} <b>Cổng thanh toán:</b> Plisio (<code>{html.escape(invoice['currency'])}</code>)\n"
+        f"{vip_em('globe')} <b>Cổng thanh toán:</b> Plisio (<code>{'USDT BEP20 (BSC)' if invoice['currency'] == 'USDT_BSC' else html.escape(invoice['currency'])}</code>)\n"
         f"{vip_em('calendar')} <b>Hạn thanh toán:</b> <code>{expiry:%H:%M:%S}</code>\n\n"
         f"{vip_em('lightning')} <i>Bấm nút bên dưới để mở hóa đơn và mã QR Plisio. "
         "Chuyển đúng số tiền và mạng được ghi trên hóa đơn.</i>"

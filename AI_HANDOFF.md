@@ -24,7 +24,7 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 
 - VietQR uses the AGY flow and shared Wolfmod orders. USDT uses the authenticated
   web route `/api/tg/orders/plisio`; the website creates the Plisio invoice with
-  its own `PLISIO_API_KEY` or `PLISIO_SECRET_KEY`. Default network `USDT_TRX` can
+  its own `PLISIO_API_KEY` or `PLISIO_SECRET_KEY`. Default network `USDT_BSC` (BEP20) can
   be configured using Vercel `TG_PLISIO_CURRENCY`.
 - Plisio callbacks reach `/api/webhook/plisio?json=true`; the web checks the HMAC,
   invoice transaction ID, currency and amount before marking the order paid.
@@ -104,7 +104,12 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   Plisio invoice rows exist. Railway previously logged only `HTTPError` when
   invoice creation failed. The bot now records only the HTTP status and a
   validated API error code. A later real request reached Plisio and failed with
-  HTTP 422 / provider code 106. The code alone does not identify the cause.
+  HTTP 422 / provider code 106. A later retry returned the provider message that
+  the TRC20 invoice must exceed 5 USDT. Admin requested BEP20, so production
+  `TG_PLISIO_CURRENCY` and the application default were changed to `USDT_BSC`.
+  Existing invoices retain their original stored network. The product currently
+  costs 0.5 USDT and the BEP20 minimum must be confirmed with the provider; do
+  not silently increase the price. The bot reports validated provider minima.
   The handler now logs an allowlisted short provider error message when safe;
   URLs, emails, long tokens and text containing the secret are rejected.
   Inspect Vercel logs after the next user-initiated retry. No real invoice was

@@ -85,6 +85,26 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conn.execute("SELECT amount FROM orders WHERE order_id='TGSOLDPRICE'").fetchone()["amount"], 20000)
         conn.close()
 
+    def test_plisio_provider_minimum_is_parsed_without_creating_order(self):
+        import io, json, urllib.error
+        body = {"error": "invoice_creation_failed", "provider_code": "106", "minimum_exclusive": 1, "minimum_currency": "USDT_BSC"}
+        error = urllib.error.HTTPError("https://example.invalid", 502, "error", {}, io.BytesIO(json.dumps(body).encode()))
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(shop_bot.PlisioMinimumAmountError) as caught:
+                shop_bot.create_web_plisio_invoice("TGSFIXTURE", SimpleNamespace(id=123, username=""), 1)
+        self.assertEqual(caught.exception.minimum, 1)
+        self.assertEqual(caught.exception.currency, "USDT_BSC")
+
+    async def test_plisio_minimum_message_shows_bep20_and_vietqr(self):
+        query = SimpleNamespace(message=SimpleNamespace(chat_id=123, message_id=42))
+        with patch.object(shop_bot, "create_web_plisio_invoice", side_effect=shop_bot.PlisioMinimumAmountError(1, "USDT_BSC")), \
+             patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as send:
+            await shop_bot.show_plisio_checkout(query, SimpleNamespace(id=123), 1)
+        text = send.await_args.args[1]
+        self.assertIn("lớn hơn 1 USDT", text)
+        self.assertIn("BEP20", text)
+        self.assertIn("VietQR", text)
+
     async def test_worker_delivers_only_orders_confirmed_paid(self):
         conn = shop_bot.get_db_connection()
         for code in ("TGSPAY1234", "TGSWAIT1234"):
