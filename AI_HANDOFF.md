@@ -42,6 +42,11 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   Audit any outstanding old orders before assuming migration is complete.
 - Both projects must remain API-compatible during deploys. Verify the active
   Railway deployment and Vercel production commit, not just GitHub push status.
+- Dashboard `tg_products` prices are shared with AGY through authenticated
+  `GET /api/tg/products/price`. The bot caches for 10 seconds for display and
+  fetches fresh prices before creating VietQR; an unavailable price blocks new
+  VietQR creation rather than silently using stale prices. Existing order amounts
+  remain snapshots; Plisio invoices use the web price.
 
 ## Checks and outstanding security task
 

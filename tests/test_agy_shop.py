@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 import shop_bot
 
+real_sync_web_product_price = shop_bot.sync_web_product_price
+
 
 class AgyShopTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -20,6 +22,9 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
             CLAIMED_LINKS_FILE=str(Path(self.directory.name) / "claimed_links.txt"))
         settings.start()
         self.addCleanup(settings.stop)
+        price_refresh = patch.object(shop_bot, "sync_web_product_price", return_value=True)
+        price_refresh.start()
+        self.addCleanup(price_refresh.stop)
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
 
@@ -62,6 +67,23 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('emoji-id="5924720918826848520"', text)
         self.assertNotIn("Lọc trùng", text)
         self.assertNotIn("Bảo hành", text)
+
+    def test_dashboard_price_refresh_preserves_existing_orders(self):
+        import json
+        conn = shop_bot.get_db_connection()
+        conn.execute("INSERT INTO orders (order_id,user_id,product_id,amount,status) VALUES (?,?,?,?,?)", ("TGSOLDPRICE", 123, "gemini_plus", 20000, "pending"))
+        conn.commit()
+        conn.close()
+        response = SimpleNamespace(read=lambda: json.dumps({"success": True, "sku": "gemini_plus", "price_vnd": 35000, "price_usdt": 2.5}).encode())
+        manager = unittest.mock.MagicMock()
+        manager.__enter__.return_value = response
+        with patch.object(shop_bot, "BOT_TOKEN", "test-token"), patch("urllib.request.urlopen", return_value=manager):
+            self.assertTrue(real_sync_web_product_price("gemini_plus", True))
+        self.assertEqual(shop_bot.get_product()["price"], 35000)
+        self.assertEqual(float(shop_bot.get_setting("usdt_price")), 2.5)
+        conn = shop_bot.get_db_connection()
+        self.assertEqual(conn.execute("SELECT amount FROM orders WHERE order_id='TGSOLDPRICE'").fetchone()["amount"], 20000)
+        conn.close()
 
     async def test_worker_delivers_only_orders_confirmed_paid(self):
         conn = shop_bot.get_db_connection()

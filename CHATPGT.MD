@@ -8,4 +8,6 @@ Website `withTransaction` bọc `client.query` và trả thẳng mảng rows; ad
 
 Mục Đơn hàng VIP đã mua chỉ liệt kê đơn local `completed`, gồm link đã giao, không liệt kê giao dịch pending/cancelled hoặc thông tin chuyển khoản. Không gửi cảnh báo đối soát cho admin khi người mua bấm kiểm tra mà chưa thấy tiền. Đơn paid nhưng chưa giao phải được khôi phục một cách idempotent, không tự ý đánh dấu giao thành công khi chưa cấp đủ link.
 
+Giá sản phẩm lấy từ `tg_products` trên dashboard thông qua API xác thực `GET /api/tg/products/price`. Bot cache giá tối đa 10 giây để hiển thị và bắt buộc lấy giá mới trước khi tạo VietQR; khi web không trả giá hợp lệ, bot không tạo hóa đơn VietQR theo giá cũ. Thay đổi giá chỉ áp dụng cho đơn mới, không sửa số tiền đã lưu của đơn cũ. Hóa đơn Plisio do web tính giá. Cập nhật giá qua dashboard là nguồn giá chính.
+
 `AI_HANDOFF.md` có cấu hình triển khai, đối soát và các giới hạn còn lại. Không ghi token, secret hay link kho vào Git hoặc log. Không tự nạp stock từ file máy. Bốn đơn thử `TGSC470FB61`, `TGSE6F70932`, `TGS37939776`, `TGSB74D2E96` đã được admin yêu cầu trả link về kho: web đánh dấu `cancelled`, SQLite đánh dấu `test_returned` và xóa link khỏi lịch sử. Không tự động giao lại các đơn thử này. Tin nhắn Telegram cũ vẫn chứa link đã hoàn kho và không được sử dụng.
