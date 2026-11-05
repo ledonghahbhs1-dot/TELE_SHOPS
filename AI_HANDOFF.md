@@ -45,17 +45,16 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 
 ## Checks and outstanding security task
 
-- Investigation 2026-11-05: admin reports a VietQR payment for `TGSB74D2E96`.
-  Wolfmod currently records the 20,000 VND order as `pending`, with no payment
+- Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.
+  Wolfmod initially recorded the 20,000 VND order as `pending`, with no payment
   reference and no matching row in `webhook_logs`. A read-only query found no
   webhook log rows at all in the preceding two hours; this does not prove whether
   SePay failed to send the webhook or Wolfmod failed to record it. During the
   follow-up live order, `TGS37939776` became `paid` at 2026-11-05 08:38:46 UTC
   with reference `96428678`; the corresponding `webhook_logs` query was still
   empty. A separate test order `TGSD146733F` remained `pending` at 08:39:23 UTC.
-  The admin's original `TGSB74D2E96` still needs independent bank-reference
-  reconciliation. Do not fabricate a SePay reference or mark it paid without
-  reconciling the transfer.
+  The admin later supplied SePay transaction `96426765` and the order was
+  reconciled as described below. Do not fabricate SePay references.
 - Bot order history now includes the five newest orders of every status and
   displays the VietQR bank, account, owner and order-code memo. VietQR details
   are snapshotted on order creation/payment-method switch and backfilled for
