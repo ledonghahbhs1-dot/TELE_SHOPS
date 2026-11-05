@@ -910,6 +910,12 @@ def create_web_plisio_invoice(order_id, user, qty):
             error_code = body.get("error", "request_rejected")
             if not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code):
                 error_code = "request_rejected"
+            provider_code = body.get("provider_code")
+            if isinstance(provider_code, (int, str)) and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(provider_code)):
+                error_code = f"{error_code}_provider_{provider_code}"
+            provider_status = body.get("provider_http_status")
+            if isinstance(provider_status, int) and 100 <= provider_status <= 599:
+                error_code = f"{error_code}_http_{provider_status}"
         except Exception:
             error_code = "request_rejected"
         raise RuntimeError(f"HTTP {error.code}: {error_code}") from None
