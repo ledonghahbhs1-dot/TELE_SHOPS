@@ -137,6 +137,11 @@ def init_database():
         cursor.execute("ALTER TABLE orders ADD COLUMN expires_at TIMESTAMP")
     except sqlite3.OperationalError:
         pass
+    for column in ("bank_name", "bank_account", "bank_owner"):
+        try:
+            cursor.execute(f"ALTER TABLE orders ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            pass
 
     # 4. Bảng cấu hình hệ thống (Settings)
     cursor.execute("""
@@ -177,6 +182,15 @@ def init_database():
     }
     for k, v in default_settings.items():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+
+    # Keep VietQR instructions attached to each order so payment details remain stable.
+    cursor.execute(
+        """UPDATE orders SET
+               bank_name = COALESCE(NULLIF(bank_name, ''), (SELECT value FROM settings WHERE key = 'bank_name')),
+               bank_account = COALESCE(NULLIF(bank_account, ''), (SELECT value FROM settings WHERE key = 'bank_account')),
+               bank_owner = COALESCE(NULLIF(bank_owner, ''), (SELECT value FROM settings WHERE key = 'bank_owner'))
+           WHERE payment_method = 'vietqr' OR payment_method IS NULL"""
+    )
 
     if os.getenv("USDT_WALLET", "").strip():
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('usdt_wallet', ?)",
@@ -1113,19 +1127,22 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expires_display = expires_dt.strftime("%H:%M:%S")
 
         conn = get_db_connection()
+        bank_name = get_setting("bank_name", "ACB")
+        bank_account = get_setting("bank_account", "68986683")
+        bank_owner = get_setting("bank_owner", "LE DONG HA")
         conn.execute(
-            "INSERT INTO orders (order_id, user_id, user_name, product_id, amount, status, payment_method, currency, quantity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', 'vietqr', 'VND', ?, ?, ?)",
-            (order_id, user_id, user.username or user.first_name, "gemini_plus", amount, qty, now_str, expires_str)
+            """INSERT INTO orders
+               (order_id, user_id, user_name, product_id, amount, status, payment_method, currency,
+                quantity, created_at, expires_at, bank_name, bank_account, bank_owner)
+               VALUES (?, ?, ?, ?, ?, 'pending', 'vietqr', 'VND', ?, ?, ?, ?, ?, ?)""",
+            (order_id, user_id, user.username or user.first_name, "gemini_plus", amount, qty,
+             now_str, expires_str, bank_name, bank_account, bank_owner)
         )
         conn.commit()
         conn.close()
 
         # Đồng bộ đơn hàng lên Web Dashboard wolfmod.xyz
         asyncio.create_task(sync_order_to_web_async(order_id, user_id, user.username or user.first_name, amount, "VND", "sepay", qty=qty))
-
-        bank_name = get_setting("bank_name", "ACB")
-        bank_account = get_setting("bank_account", "68986683")
-        bank_owner = get_setting("bank_owner", "LE DONG HA")
 
         bill_text = (
             f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>HÓA ĐƠN GIAO DỊCH VIETQR VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
@@ -1210,13 +1227,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prod = get_product("gemini_plus")
         amount = prod["price"] * qty
 
-        conn.execute("UPDATE orders SET payment_method = 'vietqr', currency = 'VND', amount = ? WHERE order_id = ?", (amount, order_id))
-        conn.commit()
-        conn.close()
-
         bank_name = get_setting("bank_name", "ACB")
         bank_account = get_setting("bank_account", "68986683")
         bank_owner = get_setting("bank_owner", "LE DONG HA")
+        conn.execute(
+            """UPDATE orders SET payment_method = 'vietqr', currency = 'VND', amount = ?,
+                   bank_name = ?, bank_account = ?, bank_owner = ? WHERE order_id = ?""",
+            (amount, bank_name, bank_account, bank_owner, order_id)
+        )
+        conn.commit()
+        conn.close()
+
         usdt_unit = float(get_setting("usdt_price", "1"))
         total_usdt = round(usdt_unit * qty, 2)
         total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
@@ -1424,7 +1445,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "my_orders":
         conn = get_db_connection()
         rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 10",
+            "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 5",
             (user_id,)
         ).fetchall()
         conn.close()
@@ -1432,16 +1453,42 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not rows:
             orders_text = (
                 f"{vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')} <b>LỊCH SỬ ĐƠN HÀNG VIP</b> {vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')}\n\n"
-                f"{vip_em('box', '📭')} <b>Quý khách chưa có đơn hàng nào đã hoàn tất!</b>\n"
+                f"{vip_em('box', '📦')} <b>Quý khách chưa có đơn hàng nào!</b>\n"
                 f"Hãy khám phá các gói đặc quyền tại Sảnh VIP nhé."
             )
         else:
             orders_text = f"{vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')} <b>DANH SÁCH ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             for r in rows:
+                status = str(r["status"] or "unknown")
+                if status == "pending":
+                    status_label = "Đang chờ thanh toán/xác nhận"
+                    status_emoji = vip_em("calendar", "⏳")
+                elif status == "completed":
+                    status_label = "Đã thanh toán và giao hàng"
+                    status_emoji = vip_em("check", "✅")
+                elif status == "cancelled":
+                    status_label = "Đã hủy"
+                    status_emoji = vip_em("cross", "❌")
+                else:
+                    status_label = html.escape(status)
+                    status_emoji = vip_em("shield", "ℹ️")
+
                 orders_text += (
-                    f"{vip_em('crown', '👑')} <b>Đơn hàng:</b> <code>{r['order_id']}</code>\n"
-                    f"{vip_em('calendar', '📅')} <b>Thời gian:</b> <code>{r['created_at']}</code>\n"
-                    f"{vip_em('key', '🔗')} <b>Link kích hoạt:</b> <code>{r['item_delivered']}</code>\n"
+                    f"{vip_em('crown', '👑')} <b>Đơn hàng:</b> <code>{html.escape(str(r['order_id']))}</code>\n"
+                    f"{status_emoji} <b>Trạng thái:</b> {status_label}\n"
+                    f"{vip_em('money', '💰')} <b>Số tiền:</b> <code>{int(float(r['amount'])):,} {html.escape(str(r['currency'] or 'VND'))}</code>\n"
+                    f"{vip_em('calendar', '📅')} <b>Thời gian:</b> <code>{html.escape(str(r['created_at'] or ''))}</code>\n"
+                )
+                if (r["payment_method"] or "vietqr") == "vietqr":
+                    orders_text += (
+                        f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{html.escape(str(r['bank_name'] or get_setting('bank_name', 'ACB')))}</code> (Ngân Hàng Á Châu)\n"
+                        f"{vip_em('card', '💳')} <b>Số tài khoản:</b> <code>{html.escape(str(r['bank_account'] or get_setting('bank_account', '68986683')))}</code>\n"
+                        f"{vip_em('user', '👤')} <b>Chủ tài khoản:</b> <code>{html.escape(str(r['bank_owner'] or get_setting('bank_owner', 'LE DONG HA')))}</code>\n"
+                        f"{vip_em('memo', '📝')} <b>Nội dung chuyển khoản:</b> <code>{html.escape(str(r['order_id']))}</code>\n"
+                    )
+                if r["item_delivered"]:
+                    orders_text += f"{vip_em('key', '🔑')} <b>Link kích hoạt:</b> <code>{html.escape(str(r['item_delivered']))}</code>\n"
+                orders_text += (
                     f"──────────────────────────\n"
                 )
 
