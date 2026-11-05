@@ -239,7 +239,7 @@ def get_stock_count(prod_id="gemini_plus"):
     # 1. Lấy trực tiếp từ Web wolfmod.xyz để luôn đồng bộ 100% với Web Admin
     try:
         url = f"https://www.wolfmod.xyz/api/tg/stock/available?sku={prod_id}"
-        req = urllib.request.Request(url, headers={"User-Agent": "TelegramShopBot"})
+        req = urllib.request.Request(url, headers={"User-Agent": "TelegramShopBot", "Authorization": f"Bearer {BOT_TOKEN}"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("success") and "available" in data:
@@ -332,37 +332,16 @@ def deliver_product(order_id, user_id):
         except Exception:
             qty = 1
 
-    delivered_links = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    for _ in range(qty):
-        # 1. Thử lấy 1 link khả dụng từ SQLite nội bộ
-        item = cursor.execute(
-            "SELECT id, content FROM stock WHERE product_id = ? AND status = 'available' LIMIT 1",
-            (order["product_id"],)
-        ).fetchone()
-
-        if item:
-            item_id = item["id"]
-            content = item["content"]
-            cursor.execute("""
-            UPDATE stock 
-            SET status = 'sold', order_id = ?, sold_at = ?, sold_to_user = ? 
-            WHERE id = ?
-            """, (order_id, now, user_id, item_id))
-            claim_stock_from_web(order["product_id"], order_id, content)
-            delivered_links.append(content)
-        else:
-            # 2. Nếu SQLite hết, claim từ Web Dashboard
-            web_link = claim_stock_from_web(order["product_id"], order_id)
-            if web_link:
-                delivered_links.append(web_link)
-            else:
-                break
-
-    if not delivered_links:
+    if int(order["user_id"]) != int(user_id):
         conn.close()
         return None
+    # The web claims the complete quantity atomically and returns the same bundle on retries.
+    bundle = claim_stock_from_web(order["product_id"], order_id)
+    delivered_links = bundle.splitlines() if bundle else []
+    if len(delivered_links) != qty:
+        conn.close()
+        return None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     all_links_text = "\n".join(delivered_links)
 
@@ -377,7 +356,7 @@ def deliver_product(order_id, user_id):
     conn.close()
 
     # Ghi nhận từng link đã giao vào file used_links.txt và xóa khỏi claimed_links.txt
-    used_file = os.path.join(BASE_DIR, "used_links.txt")
+    used_file = os.path.join(DATA_DIR, "used_links.txt")
     for link_str in delivered_links:
         try:
             with open(used_file, "a", encoding="utf-8") as f_u:
@@ -682,7 +661,7 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str]) ->
         single_link = delivered_links[0]
         msg = (
             f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{order_id}</code>!</b>\n\n"
-            f"{vip_em('check', '✅')} Hệ thống SePay đã tự động xác nhận chuyển khoản của bạn.\n"
+            f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
             f"{vip_em('key', '🔗')} <b>Link nhận Google AI Plus 400GB (12 Tháng - BH 24h):</b>\n<code>{single_link}</code>\n\n"
             f"{vip_em('diamond', '💎')} <b>Hướng dẫn kích hoạt 3 bước:</b>\n"
             f"{vip_em('num1', '1️⃣')} Mở link trên trình duyệt có Gmail cá nhân của bạn.\n"
@@ -706,7 +685,7 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str]) ->
 
         msg = (
             f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{order_id}</code>!</b>\n\n"
-            f"{vip_em('check', '✅')} Hệ thống SePay đã tự động xác nhận chuyển khoản của bạn.\n"
+            f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
             f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{qty} link</code> Google AI Plus 400GB (12 Tháng - BH 24h)\n\n"
             f"{vip_em('key', '🔗')} <b>DANH SÁCH {qty} LINK KÍCH HOẠT:</b>\n"
             f"{links_text}\n"
@@ -780,6 +759,9 @@ def sync_all_pending_orders_on_startup():
         conn.close()
         for ord_row in pending:
             cur = ord_row["currency"] if "currency" in ord_row.keys() and ord_row["currency"] else "VND"
+            if cur == "USDT":
+                # Plisio invoices are created/priced by the web; never overwrite them via legacy sync.
+                continue
             prov = "plisio" if cur == "USDT" else "sepay"
             sync_order_to_web_sync(
                 ord_row["order_id"],
@@ -787,7 +769,8 @@ def sync_all_pending_orders_on_startup():
                 ord_row["user_name"],
                 ord_row["amount"] if cur == "VND" else 20000,
                 cur,
-                prov
+                prov,
+                qty=int(ord_row["quantity"] or 1)
             )
         logger.info(f"Đã đồng bộ {len(pending)} đơn pending từ SQLite lên wolfmod.xyz")
     except Exception as e:
@@ -887,6 +870,75 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
+def create_web_plisio_invoice(order_id, user, qty):
+    import json
+    import urllib.request
+    from urllib.parse import urlsplit
+    payload = json.dumps({"order_code": order_id, "tg_user_id": user.id,
+                          "tg_username": user.username or "", "sku": "gemini_plus", "qty": qty}).encode("utf-8")
+    req = urllib.request.Request("https://www.wolfmod.xyz/api/tg/orders/plisio", data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {BOT_TOKEN}"}, method="POST")
+    with urllib.request.urlopen(req, timeout=25) as response:
+        invoice = json.loads(response.read())
+    url = urlsplit(invoice.get("invoice_url", ""))
+    if not invoice.get("success") or url.scheme != "https" or url.username or url.password or not (
+        url.hostname == "plisio.net" or (url.hostname or "").endswith(".plisio.net")
+    ) or invoice.get("order_code") != order_id:
+        raise ValueError("Invalid Plisio invoice response")
+    return invoice
+
+
+async def show_plisio_checkout(query, user, qty, order_id=None):
+    import hashlib
+    if not 1 <= qty <= 50:
+        return
+    if order_id is None:
+        # Repeated taps on the same confirmation reuse the same provider invoice.
+        reference = f"{user.id}:{query.message.chat_id}:{query.message.message_id}:{qty}"
+        order_id = "TGS" + hashlib.sha256(reference.encode()).hexdigest()[:12].upper()
+    try:
+        invoice = await asyncio.to_thread(create_web_plisio_invoice, order_id, user, qty)
+    except Exception as error:
+        logger.warning("Plisio invoice unavailable: %s", type(error).__name__)
+        await safe_edit_or_reply(query,
+            f"{vip_em('shield')} <b>Chưa thể tạo hóa đơn Plisio.</b>\n"
+            "Vui lòng thử lại hoặc chọn thanh toán VietQR.",
+            reply_markup=InlineKeyboardMarkup([
+                [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=f"select_qty_{qty}", emoji_name="refresh")],
+                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+            ]), parse_mode="HTML")
+        return
+    total = float(invoice["amount_usdt"])
+    expiry = datetime.fromisoformat(invoice["expires_at"].replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    conn = get_db_connection()
+    try:
+        conn.execute("""INSERT INTO orders (order_id,user_id,user_name,product_id,amount,status,
+            payment_method,currency,quantity,created_at,expires_at)
+            VALUES (?,?,?,'gemini_plus',?,'pending','usdt','USDT',?,?,?)
+            ON CONFLICT(order_id) DO UPDATE SET amount=excluded.amount,payment_method='usdt',
+            currency='USDT',expires_at=excluded.expires_at WHERE orders.status='pending'""",
+            (order_id,user.id,user.username or user.first_name,total,qty,
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),expiry.strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+    finally:
+        conn.close()
+    bill = (
+        f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>HÓA ĐƠN THANH TOÁN USDT VIP</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
+        f"{vip_em('tag')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
+        f"{vip_em('box')} <b>Số lượng:</b> <b>{qty} link</b>\n"
+        f"{vip_em('money')} <b>Số tiền thanh toán:</b> <code>{total:g} USDT</code>\n"
+        f"{vip_em('globe')} <b>Cổng thanh toán:</b> Plisio (<code>{html.escape(invoice['currency'])}</code>)\n"
+        f"{vip_em('calendar')} <b>Hạn thanh toán:</b> <code>{expiry:%H:%M:%S}</code>\n\n"
+        f"{vip_em('lightning')} <i>Bấm nút bên dưới để mở hóa đơn và mã QR Plisio. "
+        "Chuyển đúng số tiền và mạng được ghi trên hóa đơn.</i>"
+    )
+    await safe_edit_or_reply(query, bill, reply_markup=InlineKeyboardMarkup([
+        [vip_btn("Thanh Toán USDT Qua Plisio", url=invoice["invoice_url"], emoji_name="usdt", style="success")],
+        [vip_btn("TÔI ĐÃ THANH TOÁN — KIỂM TRA", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
+        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+    ]), parse_mode="HTML")
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -894,16 +946,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = update.effective_user
     user_id = user.id
-    if data.startswith(("create_order_usdt", "switch_pay_usdt_")) and not re.fullmatch(
-        r"0x[a-fA-F0-9]{40}", get_setting("usdt_wallet", "")
-    ):
-        await safe_edit_or_reply(query,
-            f"{vip_em('shield')} <b>Thanh toán USDT chưa được cấu hình.</b>\n"
-            "Vui lòng chọn VietQR hoặc liên hệ CSKH VIP.",
-            reply_markup=InlineKeyboardMarkup([
-                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
-            ]), parse_mode="HTML")
-        return
     if data != "custom_qty":
         AWAITING_QTY_USERS.pop(user_id, None)
 
@@ -1135,192 +1177,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
     elif data == "create_order_usdt" or data.startswith("create_order_usdt_"):
-        qty = 1
-        if data.startswith("create_order_usdt_"):
-            try:
-                qty = max(1, int(data.replace("create_order_usdt_", "")))
-            except Exception:
-                qty = 1
-
-        prod = get_product("gemini_plus")
-        stock = get_stock_count("gemini_plus")
-
-        if stock < qty:
-            await safe_edit_or_reply(
-                query,
-                f"{vip_em('cross', '❌')} <b>Sản phẩm không đủ số lượng trong kho! (Còn {stock} link)</b>\nVui lòng giảm số lượng đặt mua.",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("🔄 Chọn Lại Số Lượng", callback_data="buy_gemini_plus", emoji_name="refresh")]]),
-                parse_mode="HTML"
-            )
-            return
-
-        import secrets
-        order_id = f"TGS{secrets.token_hex(4).upper()}"
-        usdt_unit = float(get_setting("usdt_price", "1"))
-        total_usdt = round(usdt_unit * qty, 2)
-        total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
-        usdt_network = get_setting("usdt_network", "BEP20")
-        usdt_wallet = get_setting("usdt_wallet", "")
-        total_vnd = prod["price"] * qty
-
-        now_dt = datetime.now()
-        expires_dt = now_dt + timedelta(minutes=10)
-        now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-        expires_str = expires_dt.strftime("%Y-%m-%d %H:%M:%S")
-        expires_display = expires_dt.strftime("%H:%M:%S")
-
-        conn = get_db_connection()
-        conn.execute(
-            "INSERT INTO orders (order_id, user_id, user_name, product_id, amount, status, payment_method, currency, quantity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, 'pending', 'usdt', 'USDT', ?, ?, ?)",
-            (order_id, user_id, user.username or user.first_name, "gemini_plus", int(total_usdt), qty, now_str, expires_str)
-        )
-        conn.commit()
-        conn.close()
-
-        # Đồng bộ đơn hàng lên Web Dashboard wolfmod.xyz
-        asyncio.create_task(sync_order_to_web_async(order_id, user_id, user.username or user.first_name, total_vnd, "USDT", "plisio", qty=qty))
-
-        bill_text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>HÓA ĐƠN THANH TOÁN USDT VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🆔')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('box', '📦')} <b>Dịch vụ:</b> {prod['name']}\n"
-            f"{vip_em('sparkle', '✨')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-            f"{vip_em('money', '💵')} <b>Số tiền thanh toán:</b> <code>{total_usdt_str} USDT</code>\n\n"
-            f"{vip_em('globe', '🌐')} <b>Mạng chuyển (Network):</b> <code>{usdt_network}</code>\n"
-            f"{vip_em('wallet', '👛')} <b>Địa chỉ ví nhận USDT ({usdt_network}):</b>\n"
-            f"<code>{usdt_wallet}</code>\n\n"
-            f"{vip_em('memo', '📝')} <b>Nội dung / Memo (nếu có):</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('calendar', '⏳')} <b>Thời hạn thanh toán:</b> <b>10 phút</b> (Hết hạn lúc: <code>{expires_display}</code>)\n"
-            f"{vip_em('lightning', '⚡️')} <i>Mẹo VIP: Quét mã QR ví phía trên hoặc copy địa chỉ ví để chuyển đúng {total_usdt_str} USDT ({usdt_network})!</i>\n"
-            f"{vip_em('shield', '⚠️')} <i>Lưu ý: Đơn hàng sẽ tự động hủy sau 10 phút nếu chưa hoàn tất chuyển tiền.</i>"
-        )
-
-        buttons = [
-            [vip_btn("✅ TÔI ĐÃ CHUYỂN USDT XONG", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-            [vip_btn(f"💳 Đổi Sang VietQR ACB ({total_vnd:,} VNĐ)", callback_data=f"switch_pay_vietqr_{order_id}", emoji_name="card")],
-            [vip_btn("❌ HỦY GIAO DỊCH NÀY", callback_data=f"cancel_order_{order_id}", emoji_name="cross", style="danger")],
-            [vip_btn("🔙 VỀ SẢNH MENU CHÍNH", callback_data="main_menu", emoji_name="back")]
-        ]
-
-        qr_bytes = generate_crypto_qr_png_bytes(usdt_wallet)
-
-        try:
-            if qr_bytes:
-                bio = io.BytesIO(qr_bytes)
-                bio.name = f"{order_id}_usdt.png"
-                await query.message.reply_photo(
-                    photo=bio,
-                    caption=bill_text,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    parse_mode="HTML"
-                )
-                try:
-                    await query.message.delete()
-                except Exception:
-                    pass
-            else:
-                await safe_edit_or_reply(
-                    query,
-                    bill_text,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    parse_mode="HTML"
-                )
-        except Exception as e:
-            logger.warning(f"Lỗi gửi ảnh QR USDT: {e}")
-            await safe_edit_or_reply(
-                query,
-                bill_text,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
-            )
+        suffix = data.removeprefix("create_order_usdt_")
+        qty = int(suffix) if suffix.isdigit() else 1
+        await show_plisio_checkout(query, user, qty)
 
     elif data.startswith("switch_pay_usdt_"):
-        order_id = data.replace("switch_pay_usdt_", "")
+        order_id = data.removeprefix("switch_pay_usdt_")
         conn = get_db_connection()
-        order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
-        qty = 1
-        if order and "quantity" in order.keys() and order["quantity"]:
-            try:
-                qty = max(1, int(order["quantity"]))
-            except Exception:
-                qty = 1
-        conn.execute("UPDATE orders SET payment_method = 'usdt', currency = 'USDT' WHERE order_id = ?", (order_id,))
-        conn.commit()
+        order = conn.execute("SELECT * FROM orders WHERE order_id=? AND user_id=?", (order_id, user_id)).fetchone()
         conn.close()
-
-        prod = get_product("gemini_plus")
-        usdt_unit = float(get_setting("usdt_price", "1"))
-        total_usdt = round(usdt_unit * qty, 2)
-        total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
-        usdt_network = get_setting("usdt_network", "BEP20")
-        usdt_wallet = get_setting("usdt_wallet", "0xWolfModVIPBEP20Payment88888888888888888888")
-        total_vnd = prod["price"] * qty
-
-        # Tính thời gian hết hạn hiển thị
-        expires_display = "10 phút"
-        if order and "expires_at" in order.keys() and order["expires_at"]:
-            try:
-                exp_dt = datetime.strptime(order["expires_at"], "%Y-%m-%d %H:%M:%S")
-                expires_display = exp_dt.strftime("%H:%M:%S")
-            except Exception:
-                pass
-
-        bill_text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>HÓA ĐƠN THANH TOÁN USDT VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🆔')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('box', '📦')} <b>Dịch vụ:</b> {prod['name']}\n"
-            f"{vip_em('sparkle', '✨')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-            f"{vip_em('money', '💵')} <b>Số tiền thanh toán:</b> <code>{total_usdt_str} USDT</code>\n\n"
-            f"{vip_em('globe', '🌐')} <b>Mạng chuyển (Network):</b> <code>{usdt_network}</code>\n"
-            f"{vip_em('wallet', '👛')} <b>Địa chỉ ví nhận USDT ({usdt_network}):</b>\n"
-            f"<code>{usdt_wallet}</code>\n\n"
-            f"{vip_em('memo', '📝')} <b>Nội dung / Memo (nếu có):</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('calendar', '⏳')} <b>Thời hạn thanh toán:</b> <b>10 phút</b> (Hết hạn lúc: <code>{expires_display}</code>)\n"
-            f"{vip_em('lightning', '⚡️')} <i>Mẹo VIP: Quét mã QR ví phía trên hoặc copy địa chỉ ví để chuyển đúng {total_usdt_str} USDT ({usdt_network})!</i>\n"
-            f"{vip_em('shield', '⚠️')} <i>Lưu ý: Đơn hàng sẽ tự động hủy sau 10 phút nếu chưa hoàn tất chuyển tiền.</i>"
-        )
-
-        buttons = [
-            [vip_btn("✅ TÔI ĐÃ CHUYỂN USDT XONG", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-            [vip_btn(f"💳 Đổi Sang VietQR ACB ({total_vnd:,} VNĐ)", callback_data=f"switch_pay_vietqr_{order_id}", emoji_name="card")],
-            [vip_btn("❌ HỦY GIAO DỊCH NÀY", callback_data=f"cancel_order_{order_id}", emoji_name="cross", style="danger")],
-            [vip_btn("🔙 VỀ SẢNH MENU CHÍNH", callback_data="main_menu", emoji_name="back")]
-        ]
-
-        qr_bytes = generate_crypto_qr_png_bytes(usdt_wallet)
-        try:
-            if qr_bytes:
-                bio = io.BytesIO(qr_bytes)
-                bio.name = f"{order_id}_usdt.png"
-                await query.message.reply_photo(
-                    photo=bio,
-                    caption=bill_text,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    parse_mode="HTML"
-                )
-                try:
-                    await query.message.delete()
-                except Exception:
-                    pass
-            else:
-                await safe_edit_or_reply(
-                    query,
-                    bill_text,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                    parse_mode="HTML"
-                )
-        except Exception as e:
-            logger.warning(f"Lỗi gửi ảnh QR USDT: {e}")
-            await safe_edit_or_reply(
-                query,
-                bill_text,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
-            )
+        if order and order["status"] == "pending":
+            await show_plisio_checkout(query, user, int(order["quantity"] or 1), order_id)
 
     elif data.startswith("switch_pay_vietqr_"):
         order_id = data.replace("switch_pay_vietqr_", "")
@@ -1481,7 +1348,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if web_stat.get("status") in ("paid", "delivered"):
             delivered_links = deliver_product(order_id, user_id)
             if delivered_links:
-                await query.answer("✅ Giao dịch đã được SePay xác thực thành công!", show_alert=True)
+                await query.answer("✅ Giao dịch đã được xác nhận thành công!", show_alert=True)
                 msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links)
                 await query.message.reply_text(
                     msg_body,
@@ -1494,7 +1361,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_message(
                             chat_id=int(ADMIN_ID),
                             text=(
-                                f"{vip_em('lightning', '⚡️')} <b>ĐƠN HÀNG VIP <code>{order_id}</code> ĐÃ ĐƯỢC SEPAY TỰ ĐỘNG XÁC THỰC!</b>\n"
+                                f"{vip_em('lightning', '⚡️')} <b>ĐƠN HÀNG VIP <code>{order_id}</code> ĐÃ ĐƯỢC TỰ ĐỘNG XÁC THỰC!</b>\n"
                                 f"{vip_em('user', '👤')} <b>Khách VIP:</b> {user.mention_html()} (ID: <code>{user_id}</code>)\n"
                                 f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{len(delivered_links)} link</code>\n"
                                 f"{vip_em('key', '🔑')} <b>Link bàn giao:</b>\n{links_summary}"
@@ -1507,7 +1374,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         pay_method = order["payment_method"] if "payment_method" in order.keys() and order["payment_method"] else "vietqr"
         if pay_method == "usdt":
-            method_desc = "USDT (BEP20)"
+            method_desc = "USDT qua Plisio"
             usdt_unit = float(get_setting("usdt_price", "1"))
             total_usdt = round(usdt_unit * qty, 2)
             total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
@@ -1519,7 +1386,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("✅ Đã ghi nhận! Bot đang kiểm tra giao dịch và chuyển cho Admin...", show_alert=True)
         await query.message.reply_text(
             f"{vip_em('star', '⏳')} <b>Đơn hàng VIP <code>{order_id}</code> đang được hệ thống đối soát.</b>\n"
-            f"Hệ thống đang kiểm tra giao dịch <b>{method_desc}</b> qua SePay/Web. Bot sẽ tự động xuất link VIP gửi cho bạn ngay khi tiền vào tài khoản hoặc Admin bấm duyệt!\n\n"
+            f"Hệ thống đang kiểm tra giao dịch <b>{method_desc}</b> qua hệ thống thanh toán. Bot sẽ tự động xuất link VIP gửi cho bạn ngay khi tiền vào tài khoản hoặc Admin bấm duyệt!\n\n"
             f"{vip_em('calendar', '⏳')} <i>Thời hạn thanh toán: 10 phút kể từ lúc tạo đơn.</i>",
             reply_markup=InlineKeyboardMarkup([[vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]]),
             parse_mode="HTML"

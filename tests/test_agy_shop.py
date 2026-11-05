@@ -39,16 +39,49 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buttons[1][0].to_dict()["icon_custom_emoji_id"], "5292251044204521072")
         self.assertEqual(buttons[1][0].to_dict()["style"], "success")
 
-    async def test_missing_wallet_blocks_both_usdt_entry_points(self):
-        for action in ("create_order_usdt_1", "switch_pay_usdt_TGS123"):
-            query = SimpleNamespace(data=action, answer=AsyncMock())
-            update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
-            with patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as send:
-                await shop_bot.callback_handler(update, None)
-            self.assertIn("chưa được cấu hình", send.await_args.args[1])
+    async def test_invoice_failure_does_not_create_local_order_or_show_wallet(self):
+        query = SimpleNamespace(data="create_order_usdt_1", answer=AsyncMock(),
+                                message=SimpleNamespace(chat_id=123, message_id=42))
+        update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
+        with patch.object(shop_bot, "create_web_plisio_invoice", side_effect=RuntimeError("fixture")), \
+             patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as send:
+            await shop_bot.callback_handler(update, None)
+        self.assertIn("Chưa thể tạo hóa đơn Plisio", send.await_args.args[1])
         conn = shop_bot.get_db_connection()
         self.addCleanup(conn.close)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0], 0)
+
+    async def test_plisio_checkout_reuses_order_reference_and_keeps_server_price(self):
+        query = SimpleNamespace(message=SimpleNamespace(chat_id=123, message_id=42))
+        user = SimpleNamespace(id=123, username="fixture", first_name="Fixture")
+        def invoice(code, _user, qty):
+            return {"success": True, "order_code": code, "amount_usdt": 2.50, "qty": qty,
+                    "currency": "USDT_TRX", "expires_at": "2099-01-01T00:00:00Z",
+                    "invoice_url": "https://plisio.net/invoice/fixture"}
+        with patch.object(shop_bot, "create_web_plisio_invoice", side_effect=invoice) as create, \
+             patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as send:
+            await shop_bot.show_plisio_checkout(query,user,2)
+            await shop_bot.show_plisio_checkout(query,user,2)
+        self.assertEqual(create.call_args_list[0].args[0],create.call_args_list[1].args[0])
+        conn=shop_bot.get_db_connection()
+        self.addCleanup(conn.close)
+        rows=conn.execute("SELECT * FROM orders").fetchall()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["amount"],2.5)
+        self.assertEqual(rows[0]["quantity"],2)
+        self.assertIn("2.5 USDT",send.await_args.args[1])
+        button=send.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
+        self.assertEqual(button.url,"https://plisio.net/invoice/fixture")
+
+    async def test_delivery_claims_full_web_bundle_once_without_duplicates(self):
+        conn=shop_bot.get_db_connection()
+        conn.execute("INSERT INTO orders(order_id,user_id,product_id,amount,quantity) VALUES ('TGSBUNDLE',123,'gemini_plus',40000,2)")
+        conn.commit()
+        conn.close()
+        with patch.object(shop_bot,"claim_stock_from_web",return_value="https://fixture/one\nhttps://fixture/two") as claim:
+            self.assertEqual(shop_bot.deliver_product("TGSBUNDLE",123),["https://fixture/one","https://fixture/two"])
+            self.assertIsNone(shop_bot.deliver_product("TGSBUNDLE",123))
+            claim.assert_called_once()
 
     async def test_database_reinitialization_preserves_order_and_never_imports_local_links(self):
         conn = shop_bot.get_db_connection()
