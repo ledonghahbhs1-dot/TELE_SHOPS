@@ -752,6 +752,7 @@ async def send_paid_order_delivery(bot, order_id, user_id):
         conn.execute("UPDATE orders SET delivery_notified_at = CURRENT_TIMESTAMP WHERE order_id = ? AND user_id = ?", (order_id, user_id))
         conn.commit()
         conn.close()
+        logger.info("Telegram đã nhận tin giao link cho đơn %s", order_id)
         return True
 
 async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
