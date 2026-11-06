@@ -55,7 +55,14 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 
 ## Multi-product catalogue (feat/multi-product-gemini-pro)
 
-- `SHOP_SKUS` (env, comma list, default `gemini_plus,gemini_pro_account`) lists the SKUs the bot may sell;
+- Auto-discovery (feat/bot-auto-discover): the catalogue comes from `GET /api/tg/products/list`
+  (Bearer `BOT_TOKEN`, cached 45 s, retry after 10 s). Any active `item` product on the Wolfmod dashboard
+  appears in the menu with its web name/description/price/max_qty and an in-stock flag; no code change
+  or env change is needed. Entries are validated (sku `[A-Za-z0-9][A-Za-z0-9_]{1,39}`, price/max_qty ranges,
+  max 20 products); invalid ones are dropped. If the API fails the last good catalogue is kept; before
+  the first success `SHOP_SKUS` is the fallback list. `gemini_plus` is always available and unchanged.
+  The web route must be deployed before this bot version (otherwise the bot just uses `SHOP_SKUS`).
+- `SHOP_SKUS` (env, comma list, default `gemini_plus,gemini_pro_account`) is the fallback list of SKUs;
   `gemini_plus` is always first and keeps every original callback id and message. Price comes from
   `GET /api/tg/products/price?sku=`, stock from `GET /api/tg/stock/available?sku=`, both per SKU and
   cached per SKU. A SKU whose local price is 0 (never synced) is hidden.

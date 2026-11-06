@@ -71,7 +71,7 @@ CLAIMED_LINKS_FILE = os.path.join(DATA_DIR, "claimed_links.txt")
 
 # ==================== DANH MỤC SẢN PHẨM ====================
 DEFAULT_SKU = "gemini_plus"
-_SKU_RE = re.compile(r"[a-z0-9_]{1,40}")
+_SKU_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_]{1,39}")
 
 
 def _parse_shop_skus(raw: str) -> list[str]:
@@ -85,6 +85,121 @@ def _parse_shop_skus(raw: str) -> list[str]:
 
 # Danh sách SKU được phép hiển thị/mua. Giá, tồn kho và trạng thái hoạt động luôn lấy từ web.
 SHOP_SKUS = _parse_shop_skus(os.getenv("SHOP_SKUS", "gemini_plus,gemini_pro_account"))
+
+# ==================== TỰ PHÁT HIỆN SẢN PHẨM TỪ WEB ====================
+# GET /api/tg/products/list (Bearer BOT_TOKEN) trả mọi sản phẩm đang bán. Sản phẩm mới thêm trên
+# dashboard tự xuất hiện trong menu, không cần sửa code. SHOP_SKUS chỉ còn là danh sách dự phòng
+# khi web chưa tải được lần nào; nếu đã có cache thì lỗi mạng giữ nguyên cache cũ (không làm menu trống).
+import json as _json
+import threading as _threading
+import time as _time
+
+CATALOGUE_TTL_SEC = 45.0
+CATALOGUE_RETRY_SEC = 10.0
+CATALOGUE_MAX_ITEMS = 20
+_catalogue_lock = _threading.Lock()
+_catalogue: dict = {"items": None, "next": 0.0}  # items: {sku: row} hoặc None nếu chưa tải được lần nào
+
+
+def _clean_catalogue(payload) -> dict:
+    """Kiểm tra chặt dữ liệu từ web; sản phẩm không hợp lệ bị bỏ, không làm hỏng cả danh sách."""
+    if not isinstance(payload, dict) or payload.get("success") is not True or not isinstance(payload.get("products"), list):
+        raise ValueError("invalid catalogue payload")
+    items: dict = {}
+    for raw in payload["products"][:100]:
+        if not isinstance(raw, dict):
+            continue
+        sku, name, description = raw.get("sku"), raw.get("name"), raw.get("description")
+        price_vnd, price_usdt, max_qty = raw.get("price_vnd"), raw.get("price_usdt"), raw.get("max_qty")
+        if not isinstance(sku, str) or not _SKU_RE.fullmatch(sku):
+            continue
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 160:
+            continue
+        if description is not None and not isinstance(description, str):
+            continue
+        if raw.get("type") != "item":  # key/credits được giao theo luồng khác
+            continue
+        if isinstance(price_vnd, bool) or not isinstance(price_vnd, int) or not 0 < price_vnd <= 100_000_000:
+            continue
+        if price_usdt is not None and (isinstance(price_usdt, bool) or not isinstance(price_usdt, (int, float)) or not 0 < price_usdt <= 1_000_000):
+            continue
+        if isinstance(max_qty, bool) or not isinstance(max_qty, int) or not 1 <= max_qty <= 50:
+            continue
+        if not isinstance(raw.get("in_stock"), bool):
+            continue
+        items[sku] = {
+            "sku": sku, "name": name.strip(), "description": (description or "")[:2000],
+            "price_vnd": price_vnd, "price_usdt": price_usdt, "max_qty": max_qty, "in_stock": raw["in_stock"],
+        }
+        if len(items) >= CATALOGUE_MAX_ITEMS:
+            break
+    return items
+
+
+def _fetch_catalogue_payload():
+    import urllib.request
+    if not BOT_TOKEN:
+        raise RuntimeError("no bot token")
+    req = urllib.request.Request("https://www.wolfmod.xyz/api/tg/products/list",
+                                 headers={"Authorization": f"Bearer {BOT_TOKEN}", "User-Agent": "TelegramShopBot"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return _json.loads(resp.read(262144).decode("utf-8"))
+
+
+def _store_catalogue(items: dict) -> None:
+    """Ghi tên/mô tả/giá/max_qty của sản phẩm phát hiện được vào SQLite để mọi luồng hiện có (get_product...) dùng lại."""
+    conn = get_db_connection()
+    try:
+        for sku, item in items.items():
+            if sku == DEFAULT_SKU:
+                continue  # gemini_plus giữ nguyên tên/mô tả cục bộ; giá được đồng bộ bởi sync_web_product_price
+            conn.execute(
+                """INSERT INTO products (id, name, description, price, guide_text, max_qty) VALUES (?, ?, ?, ?, '', ?)
+                   ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description,
+                       price = excluded.price, max_qty = excluded.max_qty""",
+                (sku, item["name"], item["description"], item["price_vnd"], item["max_qty"]),
+            )
+            if item["price_usdt"] is not None:
+                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                             (usdt_setting_key(sku), str(item["price_usdt"])))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def refresh_catalogue(force: bool = False) -> bool:
+    """Tải danh mục từ web (cache ~45 s). Lỗi: giữ cache cũ, thử lại sau ~10 s. Trả True nếu danh mục hiện có là dữ liệu web."""
+    with _catalogue_lock:
+        now = _time.monotonic()
+        if not force and now < _catalogue["next"]:
+            return _catalogue["items"] is not None
+        try:
+            items = _clean_catalogue(_fetch_catalogue_payload())
+            _store_catalogue(items)
+        except Exception as error:
+            _catalogue["next"] = now + CATALOGUE_RETRY_SEC
+            if not (isinstance(error, RuntimeError) and str(error) == "no bot token"):
+                logger.warning("Không tải được danh mục sản phẩm từ web: %s", type(error).__name__)
+            return _catalogue["items"] is not None
+        _catalogue["items"] = items
+        _catalogue["next"] = now + CATALOGUE_TTL_SEC
+        return True
+
+
+def known_skus() -> list[str]:
+    """SKU được phép bán: danh mục web nếu đã tải được, nếu chưa thì SHOP_SKUS (dự phòng). gemini_plus luôn đứng đầu."""
+    items = _catalogue["items"]
+    if items is None:
+        return list(SHOP_SKUS)
+    return [DEFAULT_SKU] + [sku for sku in items if sku != DEFAULT_SKU]
+
+
+def sku_in_stock_hint(sku: str) -> bool:
+    """Còn hàng theo danh mục web; chưa có danh mục thì hỏi trực tiếp kho. (Màn mua vẫn kiểm tra kho thật.)"""
+    items = _catalogue["items"]
+    if items is not None and sku in items:
+        return bool(items[sku]["in_stock"])
+    return get_stock_count(sku) > 0
 
 
 def get_db_connection():
@@ -761,13 +876,13 @@ def cb_qty(kind: str, sku: str, qty: int) -> str:
     return f"{prefix}:{sku}:{qty}"
 
 
-_SKU_CB_RE = re.compile(r"(sq|cv|cu):([a-z0-9_]{1,40}):(\d{1,3})")
+_SKU_CB_RE = re.compile(r"(sq|cv|cu):([A-Za-z0-9][A-Za-z0-9_]{1,39}):(\d{1,3})")
 
 
 def parse_sku_qty_callback(data: str):
     """('sq'|'cv'|'cu', sku, qty) cho callback đa sản phẩm; None nếu không khớp hoặc SKU không được bán."""
     match = _SKU_CB_RE.fullmatch(data or "")
-    if not match or match.group(2) not in SHOP_SKUS:
+    if not match or match.group(2) not in known_skus():
         return None
     return match.group(1), match.group(2), int(match.group(3))
 
@@ -775,14 +890,13 @@ def parse_sku_qty_callback(data: str):
 def extra_products_text() -> str:
     """Các sản phẩm ngoài gemini_plus đang mở bán, hiển thị trong màn hình chào."""
     lines = []
-    for sku in SHOP_SKUS:
+    for sku in known_skus():
         if sku == DEFAULT_SKU:
             continue
         row = get_product(sku)
         if not row or int(row["price"] or 0) <= 0:
             continue
-        stock = get_stock_count(sku)
-        status = f"Kho: {stock}" if stock > 0 else "HẾT HÀNG"
+        status = "Còn hàng" if sku_in_stock_hint(sku) else "HẾT HÀNG"
         lines.append(f"<b>{html.escape(str(row['name']))}</b> — <b>{int(row['price']):,} VNĐ</b> ({status})")
     if not lines:
         return ""
@@ -1057,14 +1171,14 @@ def main_menu_keyboard(user_id=None):
         ],
     ]
     # Sản phẩm khác: luôn được liệt kê; hết hàng thì nút không cho mua.
-    for sku in SHOP_SKUS:
+    for sku in known_skus():
         if sku == DEFAULT_SKU:
             continue
         row = get_product(sku)
         if not row or int(row["price"] or 0) <= 0:
             continue
         label = str(row["name"])[:32]
-        if get_stock_count(sku) > 0:
+        if sku_in_stock_hint(sku):
             keyboard.append([vip_btn(f"MUA {label} • {int(row['price']):,} VNĐ", callback_data=cb_buy(sku), emoji_name="crown", style="primary")])
         else:
             keyboard.append([vip_btn(f"{label} • HẾT HÀNG", callback_data=f"soldout_{sku}", emoji_name="cross")])
@@ -1083,6 +1197,7 @@ def main_menu_keyboard(user_id=None):
 # ==================== HANDLERS ====================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await asyncio.to_thread(refresh_catalogue)
     await asyncio.to_thread(sync_web_product_price)
     price = get_product("gemini_plus")["price"]
     usdt_price = get_setting("usdt_price", "1")
@@ -1176,7 +1291,7 @@ def create_web_plisio_invoice(order_id, user, qty, sku=DEFAULT_SKU):
 
 async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU):
     import hashlib
-    if not 1 <= qty <= 50 or sku not in SHOP_SKUS or (sku != DEFAULT_SKU and qty > sku_max_qty(sku)):
+    if not 1 <= qty <= 50 or sku not in known_skus() or (sku != DEFAULT_SKU and qty > sku_max_qty(sku)):
         return
     if order_id is None:
         # Repeated taps on the same confirmation reuse the same provider invoice.
@@ -1250,14 +1365,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = update.effective_user
     user_id = user.id
+    await asyncio.to_thread(refresh_catalogue)
     sku_cb = parse_sku_qty_callback(data)
-    custom_sku = data[3:] if data.startswith("cq:") and data[3:] in SHOP_SKUS else None
+    custom_sku = data[3:] if data.startswith("cq:") and data[3:] in known_skus() else None
     if data != "custom_qty" and custom_sku is None:
         AWAITING_QTY_USERS.pop(user_id, None)
 
     if data in ("main_menu", "buy_gemini_plus", "custom_qty"):
         await asyncio.to_thread(sync_web_product_price)
-    elif data.startswith("buy_") and data[4:] in SHOP_SKUS:
+    elif data.startswith("buy_") and data[4:] in known_skus():
         await asyncio.to_thread(sync_web_product_price, data[4:])
 
     if data == "main_menu":
@@ -1289,14 +1405,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    elif data == "buy_gemini_plus" or (data.startswith("buy_") and data[4:] in SHOP_SKUS):
+    elif data == "buy_gemini_plus" or (data.startswith("buy_") and data[4:] in known_skus()):
         sku = DEFAULT_SKU if data == "buy_gemini_plus" else data[4:]
         prod = get_product(sku)
         stock = get_stock_count(sku)
-        price_fmt = f"{prod['price']:,} VNĐ"
+        price_fmt = f"{prod['price']:,} VNĐ" if prod else "0 VNĐ"
         usdt_price = get_setting(usdt_setting_key(sku), "1")
 
-        if sku != DEFAULT_SKU and int(prod["price"] or 0) <= 0:
+        if sku != DEFAULT_SKU and (prod is None or int(prod["price"] or 0) <= 0):
             await safe_edit_or_reply(
                 query,
                 f"{vip_em('cross', '❌')} <b>Sản phẩm tạm thời chưa mở bán.</b>\nVui lòng quay lại sau hoặc liên hệ CSKH VIP.",
@@ -1393,7 +1509,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await safe_edit_or_reply(query, detail_caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-    elif data.startswith("soldout_") and data[8:] in SHOP_SKUS:
+    elif data.startswith("soldout_") and data[8:] in known_skus():
         await query.answer("Sản phẩm này hiện đã hết hàng. Vui lòng quay lại sau!", show_alert=True)
 
     elif data.startswith("select_qty_") or (sku_cb and sku_cb[0] == "sq"):
@@ -1567,7 +1683,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order = conn.execute("SELECT * FROM orders WHERE order_id=? AND user_id=?", (order_id, user_id)).fetchone()
         conn.close()
         if order and order["status"] == "pending":
-            if order_sku(order) not in SHOP_SKUS:
+            if order_sku(order) not in known_skus():
                 await query.answer("Sản phẩm của đơn này hiện không còn được bán.", show_alert=True)
                 return
             await show_plisio_checkout(query, user, int(order["quantity"] or 1), order_id, sku=order_sku(order))
@@ -1581,7 +1697,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Đơn hàng không hợp lệ.", show_alert=True)
             return
         sku = order_sku(order)
-        if sku not in SHOP_SKUS:
+        if sku not in known_skus():
             await query.answer("Sản phẩm của đơn này hiện không còn được bán.", show_alert=True)
             return
         if not await asyncio.to_thread(sync_web_product_price, sku, True):
