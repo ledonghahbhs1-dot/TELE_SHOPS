@@ -105,6 +105,21 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 - Banner photos: caption is limited to 1024 characters; a longer intro is sent as a short-caption photo followed by
   the full intro as its own message with the buttons (`send_product_screen`).
 
+## USDT BEP20 via QR of the wallet address (feat/usdt-bep20-qr, task 019 part 1) - OFF by default
+
+- Optional extra payment method next to VietQR and Plisio (Plisio is untouched). Enable with `BEP20_ENABLED=1`
+  on Railway AFTER the web routes are deployed and `TG_BEP20_ENABLED=1` is set on Vercel; otherwise the button does
+  not appear and the callback only shows an alert.
+- Flow: the bot asks the web to create the order (`POST /api/tg/orders/bep20`), validates the answer strictly
+  (network "BSC (BEP20)", token USDT, wallet address format, 2-decimal amount, order code, quantity, confirmations),
+  stores a local order (`payment_method='bep20'`, the real SKU, the exact amount) and shows a locally generated QR
+  of the plain `0x...` wallet address with the exact per-order amount, the deadline and wrong-network warnings.
+  Pressing "Tôi đã thanh toán — kiểm tra" (and the background recovery task) asks the web to check the chain
+  (`POST /api/tg/orders/bep20/check`); delivery then follows the normal paid-order path. `needs_review` (late or
+  ambiguous payment) is never delivered automatically.
+- The shop wallet address and the token contract live only in the web environment (`TG_BEP20_RECEIVE_ADDRESS`,
+  `TG_BEP20_USDT_CONTRACT`); a test fails if the wallet or the Binance Pay ID appears in this repository.
+
 ## Checks and outstanding security task
 
 - Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.
