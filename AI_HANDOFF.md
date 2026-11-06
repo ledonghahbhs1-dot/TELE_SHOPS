@@ -76,6 +76,20 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 - Still `gemini_plus` only: `/setprice`, `/addstock`, admin panel stock/revenue views, `/setusdt`, guide screen.
   Stock for other SKUs is managed on the Wolfmod dashboard.
 
+## Orders and guides per product (feat/orders-guides-per-product-v2, task 017)
+
+- The main menu has only an "Đơn Hàng VIP Của Tôi" button (`my_orders`); the welcome/main screens show no orders
+  and no guide text. Pressing it shows the customer's own delivered orders (completed only, newest first,
+  5 per page via `ordp:<page>`), each with the product name taken from the order's SKU. Long order contents
+  are shortened so a page always fits Telegram's 4096-character limit.
+- Guides are per product, stored by SKU in `product_guides.py` (`GUIDES`). The old "Cẩm nang kích hoạt" text was
+  always the `gemini_plus` guide and is now only that entry (text unchanged). A guide is reachable only from the
+  product detail screen and from the orders list, via `gd:<sku>`, and only for products that have their own entry.
+  A product without an entry has no guide button (and `gd:<sku>` answers with a neutral notice); another product's
+  guide text is never shown. The legacy `guide` callback (old messages) shows a short notice.
+- Add a guide for a new product by adding an entry to `GUIDES`. The `gemini_pro_account` text is a draft: confirm
+  warranty/password-change policy with the owner before relying on it.
+
 ## Checks and outstanding security task
 
 - Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.

@@ -17,6 +17,7 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import product_guides
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -1161,6 +1162,102 @@ async def safe_edit_or_reply(query, text, reply_markup=None, parse_mode="HTML", 
         except Exception as e2:
             logger.error(f"Lỗi gửi tin nhắn fallback: {e2}")
 
+ORDERS_PAGE_SIZE = 5
+ORDER_CONTENT_PREVIEW = 600  # Telegram giới hạn 4096 ký tự/tin nhắn; đơn nhiều link được rút gọn khi liệt kê
+_VIEW_CB_RE = re.compile(r"(gd:([A-Za-z0-9][A-Za-z0-9_]{1,39})|ordp:(\d{1,4}))")
+NO_GUIDE_TEXT = "Sản phẩm này chưa có hướng dẫn riêng. Nếu cần hỗ trợ, vui lòng liên hệ CSKH kèm mã đơn hàng."
+
+
+def parse_view_callback(data: str):
+    """('gd', sku) hoặc ('ordp', số_trang); None nếu không hợp lệ."""
+    match = _VIEW_CB_RE.fullmatch(data or "")
+    if not match:
+        return None
+    if match.group(2):
+        return "gd", match.group(2)
+    return "ordp", int(match.group(3))
+
+
+def has_own_guide(sku: str) -> bool:
+    return product_guides.has_guide(sku)
+
+
+def render_guide(sku: str):
+    """Hướng dẫn RIÊNG của sản phẩm, hoặc None nếu sản phẩm chưa có (không bao giờ mượn nội dung SKU khác)."""
+    guide = product_guides.get_guide(sku)
+    if guide is None:
+        return None
+    lines = [
+        f"{vip_em('star', '⚜️')} ═══════ {vip_em('book', '📖')} <b>{guide['title']}</b> {vip_em('book', '📖')} ═══════ {vip_em('star', '⚜️')}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n",
+        f"{vip_em('diamond', '💎')} <b>{guide['intro']}</b>\n\n",
+    ]
+    for number, step in enumerate(guide["steps"], 1):
+        marker = vip_em(f"num{number}", f"{number}️⃣") if number <= 3 else f"{number}."
+        lines.append(f"{marker} <b>Bước {number}:</b> {step}\n\n")
+    lines.append(f"{vip_em('star', '💡')} <b>{guide['notes_title']}</b>\n")
+    for emoji_name, fallback, text in guide["notes"]:
+        lines.append(f"{vip_em(emoji_name, fallback)} {text}\n")
+    lines.append(f"\n{vip_em('shield', '🛡')} <i>Đội ngũ kỹ thuật WolfMod luôn sẵn sàng đồng hành hỗ trợ Quý Khách 24/7!</i>")
+    return "".join(lines)
+
+
+def render_orders_page(user_id: int, page: int):
+    """(text, keyboard) — đơn đã giao của CHÍNH khách này, mỗi đơn ghi đúng tên sản phẩm theo SKU của đơn."""
+    conn = get_db_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'completed'", (user_id,)).fetchone()["n"]
+        pages = max(1, (total + ORDERS_PAGE_SIZE - 1) // ORDERS_PAGE_SIZE)
+        page = min(max(1, page), pages)
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' "
+            "ORDER BY completed_at DESC, created_at DESC, order_id DESC LIMIT ? OFFSET ?",
+            (user_id, ORDERS_PAGE_SIZE, (page - 1) * ORDERS_PAGE_SIZE),
+        ).fetchall()
+    finally:
+        conn.close()
+    text = f"{vip_em('diamond')} ═══════ {vip_em('crown')} <b>ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown')} ═══════ {vip_em('diamond')}\n\n"
+    keyboard = []
+    if not rows:
+        text += f"{vip_em('box')} <b>Bạn chưa có đơn hàng nào đã giao.</b>"
+    seen_guides: list[str] = []
+    # Telegram: tối đa 4096 ký tự sau khi bỏ thẻ HTML. Chia đều ngân sách cho phần nội dung của các đơn trên trang.
+    def _display_name(row) -> str:
+        return 'Google AI Plus 400GB (12 Tháng)' if str(row["product_id"]) == DEFAULT_SKU else sku_display_name(str(row["product_id"]))
+    fixed_chars = sum(len(_display_name(row)) + len(str(row["order_id"])) + 200 for row in rows)
+    preview_limit = max(60, min(ORDER_CONTENT_PREVIEW, (3600 - fixed_chars) // max(1, len(rows))))
+    for row in rows:
+        sku = str(row["product_id"])
+        name = _display_name(row)
+        label = "Link kích hoạt" if sku == DEFAULT_SKU else "Thông tin nhận hàng"
+        content_lines = str(row["item_delivered"] or "").splitlines()
+        content = "\n".join(content_lines)
+        if len(content) > preview_limit:
+            content = content[:preview_limit].rsplit("\n", 1)[0]
+            content += f"\n… (rút gọn, {len(content_lines)} dòng trong đơn)"
+        text += (
+            f"{vip_em('tag')} <b>Đơn hàng:</b> <code>{html.escape(str(row['order_id']))}</code>\n"
+            f"{vip_em('box')} <b>Sản phẩm:</b> {html.escape(name)}\n"
+            f"{vip_em('calendar')} <b>Thời gian:</b> <code>{html.escape(str(row['completed_at'] or row['created_at'] or ''))}</code>\n"
+            f"{vip_em('check')} <b>Trạng thái:</b> Đã giao\n"
+            f"{vip_em('key')} <b>{label}:</b>\n<code>{html.escape(content)}</code>\n"
+            "──────────────────────────\n"
+        )
+        if has_own_guide(sku) and sku not in seen_guides:
+            seen_guides.append(sku)
+            keyboard.append([vip_btn(f"Hướng dẫn: {name}"[:48], callback_data=f"gd:{sku}", emoji_name="book")])
+    if pages > 1:
+        text += f"\n<i>Trang {page}/{pages} • {total} đơn</i>"
+        nav = []
+        if page > 1:
+            nav.append(vip_btn("◀ Trang trước", callback_data=f"ordp:{page - 1}", emoji_name="back"))
+        if page < pages:
+            nav.append(vip_btn("Trang sau ▶", callback_data=f"ordp:{page + 1}", emoji_name="refresh"))
+        keyboard.append(nav)
+    keyboard.append([vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
+    return text, InlineKeyboardMarkup(keyboard)
+
+
 def main_menu_keyboard(user_id=None):
     stock_count = get_stock_count("gemini_plus")
     price = get_product("gemini_plus")["price"]
@@ -1184,8 +1281,7 @@ def main_menu_keyboard(user_id=None):
             keyboard.append([vip_btn(f"{label} • HẾT HÀNG", callback_data=f"soldout_{sku}", emoji_name="cross")])
     keyboard += [
         [
-            vip_btn("Đơn Hàng VIP Của Tôi", callback_data="my_orders", emoji_name="diamond"),
-            vip_btn("Cẩm Nang Kích Hoạt 400GB", callback_data="guide", emoji_name="book")
+            vip_btn("Đơn Hàng VIP Của Tôi", callback_data="my_orders", emoji_name="diamond")
         ],
         [
             vip_btn("CSKH Trực Tuyến 24/7", callback_data="support", emoji_name="chat")
@@ -1367,6 +1463,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     await asyncio.to_thread(refresh_catalogue)
     sku_cb = parse_sku_qty_callback(data)
+    view_cb = parse_view_callback(data)
     custom_sku = data[3:] if data.startswith("cq:") and data[3:] in known_skus() else None
     if data != "custom_qty" and custom_sku is None:
         AWAITING_QTY_USERS.pop(user_id, None)
@@ -1484,6 +1581,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [[vip_btn(f"{n}", callback_data=cb_qty("select", sku, n), emoji_name="crown") for n in choices]]
                 keyboard.append([vip_btn("✏️ Nhập Số Lượng Tùy Chỉnh", callback_data=f"cq:{sku}", emoji_name="edit", style="primary")])
             keyboard.append([vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
+
+        if has_own_guide(sku):
+            keyboard.insert(len(keyboard) - 1, [vip_btn("📖 Hướng Dẫn Sản Phẩm Này", callback_data=f"gd:{sku}", emoji_name="book")])
 
         banner_path = get_product_banner_path(sku)
         if banner_path and os.path.exists(banner_path):
@@ -1927,49 +2027,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    elif data == "my_orders":
-        conn = get_db_connection()
-        rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' ORDER BY completed_at DESC, created_at DESC LIMIT 10",
-            (user_id,),
-        ).fetchall()
-        conn.close()
-        orders_text = f"{vip_em('diamond')} ═══════ {vip_em('crown')} <b>ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown')} ═══════ {vip_em('diamond')}\n\n"
-        if not rows:
-            orders_text += f"{vip_em('box')} <b>Quý khách chưa có đơn hàng nào đã giao.</b>"
-        for row in rows:
-            orders_text += (
-                f"{vip_em('tag')} <b>Đơn hàng:</b> <code>{html.escape(str(row['order_id']))}</code>\n"
-                f"{vip_em('box')} <b>Sản phẩm:</b> {html.escape('Google AI Plus 400GB (12 Tháng)' if row['product_id'] == DEFAULT_SKU else sku_display_name(str(row['product_id'])))}\n"
-                f"{vip_em('calendar')} <b>Thời gian:</b> <code>{html.escape(str(row['completed_at'] or row['created_at'] or ''))}</code>\n"
-                f"{vip_em('key')} <b>Link kích hoạt:</b>\n<code>{html.escape(str(row['item_delivered'] or ''))}</code>\n"
-                "──────────────────────────\n"
-            )
-        keyboard = [
-            [vip_btn("Mua Thêm Gói VIP", callback_data="buy_gemini_plus", emoji_name="crown", style="primary")],
-            [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
-        ]
-        await safe_edit_or_reply(query, orders_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    elif data == "my_orders" or (view_cb and view_cb[0] == "ordp"):
+        # Bấm "Đơn hàng" mới hiện đơn của chính khách (có phân trang); màn chính không liệt kê đơn.
+        orders_text, orders_markup = render_orders_page(user_id, 1 if data == "my_orders" else view_cb[1])
+        await safe_edit_or_reply(query, orders_text, reply_markup=orders_markup, parse_mode="HTML")
+
+    elif view_cb and view_cb[0] == "gd":
+        # Hướng dẫn chỉ của đúng sản phẩm này; chưa có thì báo trung tính, không mượn hướng dẫn sản phẩm khác.
+        sku = view_cb[1]
+        guide_text = render_guide(sku)
+        keyboard = []
+        if sku in known_skus():
+            keyboard.append([vip_btn(" Xem Sản Phẩm Này", callback_data=cb_buy(sku), emoji_name="lightning", style="success")])
+        keyboard.append([vip_btn("Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="diamond")])
+        keyboard.append([vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
+        await safe_edit_or_reply(query, guide_text if guide_text is not None else f"{vip_em('shield', '🛡')} {NO_GUIDE_TEXT}",
+                                 reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "guide":
-        prod = get_product("gemini_plus")
-        guide_msg = (
-            f"{vip_em('star', '⚜️')} ═══════ {vip_em('book', '📖')} <b>CẨM NANG KÍCH HOẠT VIP</b> {vip_em('book', '📖')} ═══════ {vip_em('star', '⚜️')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{vip_em('diamond', '💎')} <b>Quy trình 3 bước kích hoạt Gemini Plus 2TB:</b>\n\n"
-            f"{vip_em('num1', '1️⃣')} <b>Bước 1:</b> Chuẩn bị tài khoản Gmail cá nhân của bạn (khuyên dùng Gmail chưa dính gói tranh chấp gia đình).\n\n"
-            f"{vip_em('num2', '2️⃣')} <b>Bước 2:</b> Nhấp vào Link nhận được từ bot sau khi thanh toán thành công.\n\n"
-            f"{vip_em('num3', '3️⃣')} <b>Bước 3:</b> Google sẽ hiển thị thông báo mời tham gia gói ưu đãi 2TB. Bạn chỉ cần nhấn <b>Chấp nhận (Accept)</b>.\n\n"
-            f"{vip_em('star', '💡')} <b>Lưu ý đặc quyền VIP:</b>\n"
-            f"{vip_em('check', '✦')} Sử dụng song song trên cả Máy tính (PC), Điện thoại (Android/iOS).\n"
-            f"{vip_em('shield', '✦')} Nếu Google yêu cầu thêm phương thức thanh toán để xác minh 0đ, bạn có thể thêm thẻ ngân hàng ảo/thật (Google hoàn toàn không trừ phí).\n\n"
-            f"{vip_em('shield', '🛡')} <i>Đội ngũ kỹ thuật WolfMod luôn sẵn sàng đồng hành hỗ trợ Quý Khách 24/7!</i>"
-        )
-        keyboard = [
-            [vip_btn(" Đặt Mua Gói VIP Ngay", callback_data="buy_gemini_plus", emoji_name="lightning", style="success")],
-            [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
-        ]
-        await safe_edit_or_reply(query, guide_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        # Nút cũ còn sót trong tin nhắn đã gửi: hướng dẫn không còn là màn chung.
+        await safe_edit_or_reply(
+            query,
+            f"{vip_em('book', '📖')} Hướng dẫn nằm trong từng sản phẩm (màn chi tiết sản phẩm) và trong đơn hàng của sản phẩm đó.",
+            reply_markup=InlineKeyboardMarkup([
+                [vip_btn("Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="diamond")],
+                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+            ]), parse_mode="HTML")
 
     elif data == "support":
         contact = get_setting("support_contact", "@wolfmodyt")
