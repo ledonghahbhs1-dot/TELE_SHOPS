@@ -53,6 +53,22 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
   sent/failed/unchanged; a Telegram failure does not roll back the price change
   and the notice currently has no durable retry queue.
 
+## Multi-product catalogue (feat/multi-product-gemini-pro)
+
+- `SHOP_SKUS` (env, comma list, default `gemini_plus,gemini_pro_account`) lists the SKUs the bot may sell;
+  `gemini_plus` is always first and keeps every original callback id and message. Price comes from
+  `GET /api/tg/products/price?sku=`, stock from `GET /api/tg/stock/available?sku=`, both per SKU and
+  cached per SKU. A SKU whose local price is 0 (never synced) is hidden.
+- Out-of-stock products stay listed with a "HẾT HÀNG" button (`soldout_<sku>`) and cannot be bought.
+  Max quantity per order is `products.max_qty` (pro account = 1).
+- Callbacks for non-default SKUs: `buy_<sku>`, `sq:<sku>:<qty>`, `cv:<sku>:<qty>` (VietQR), `cu:<sku>:<qty>`
+  (USDT), `cq:<sku>` (custom qty). `orders.product_id` is the real SKU and is what is synced to the web,
+  sent to Plisio, claimed from stock and shown in purchase history. Plisio order ids include the SKU for
+  non-default products so two products can never share an order code.
+- Non-URL deliveries (account `Gmail|password`) are sent as text only; never put such content in a URL button.
+- Still `gemini_plus` only: `/setprice`, `/addstock`, admin panel stock/revenue views, `/setusdt`, guide screen.
+  Stock for other SKUs is managed on the Wolfmod dashboard.
+
 ## Checks and outstanding security task
 
 - Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.
