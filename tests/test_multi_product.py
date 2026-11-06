@@ -93,7 +93,9 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         text = render.await_args.args[1]
         self.assertIn("HẾT HÀNG", text)
         datas = [b.callback_data for b in buttons(render.await_args.kwargs["reply_markup"])]
-        self.assertEqual(datas, ["main_menu"])
+        # the product intro stays visible (with its own guide), but nothing can be bought
+        self.assertEqual(datas, [f"gd:{PRO}", "main_menu"])
+        self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", text)
 
     async def test_sold_out_button_only_alerts(self):
         query = make_query(f"soldout_{PRO}")

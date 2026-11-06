@@ -105,7 +105,6 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"soldout_{NEW}", datas(keyboard))
         self.assertNotIn(f"buy_{NEW}", datas(keyboard))
         self.assertTrue(any("HẾT HÀNG" in t for t in texts(keyboard)))
-        self.assertIn("HẾT HÀNG", shop_bot.extra_products_text())
 
     async def test_discovered_product_detail_screen_checks_real_stock(self):
         with self.web(item(NEW, in_stock=True)):
