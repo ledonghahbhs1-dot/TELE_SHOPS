@@ -49,7 +49,7 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
             conn.execute("INSERT INTO orders (order_id,user_id,product_id,amount,status,item_delivered) VALUES (?,?,?,?,?,?)", (code, 123, "gemini_plus", 20000, status, link))
         conn.commit()
         conn.close()
-        query = SimpleNamespace(data="my_orders", answer=AsyncMock())
+        query = SimpleNamespace(data="ord:gemini_plus", answer=AsyncMock())
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=123))
         with patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render:
             await shop_bot.callback_handler(update, SimpleNamespace())

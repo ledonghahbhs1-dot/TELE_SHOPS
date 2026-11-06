@@ -261,7 +261,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
                      ("TGSPROHIST1", 123, PRO, 125000, "completed", "a@gmail.com|pw"))
         conn.commit()
         conn.close()
-        query = make_query("my_orders")
+        query = make_query(f"ord:{PRO}")
         with patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render:
             await shop_bot.callback_handler(make_update(query), SimpleNamespace())
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", render.await_args.args[1])

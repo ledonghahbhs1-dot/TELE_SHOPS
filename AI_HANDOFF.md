@@ -76,6 +76,17 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 - Still `gemini_plus` only: `/setprice`, `/addstock`, admin panel stock/revenue views, `/setusdt`, guide screen.
   Stock for other SKUs is managed on the Wolfmod dashboard.
 
+## Orders and guides per product (feat/orders-guide-per-product)
+
+- Main menu "Đơn Hàng VIP Của Tôi" (`my_orders`) now shows a product list (catalogue plus any product the
+  user has bought, even if retired); `ord:<sku>` shows that product's delivered orders only (own orders,
+  completed only), with that product's guide button. Retired products stay viewable but have no buy button.
+- Main menu "Hướng Dẫn Sử Dụng" (`guide`) shows a product list; `gd:<sku>` renders that product's own guide
+  from `product_guides.py` (dict keyed by SKU). A SKU without an entry gets the neutral `GENERIC_GUIDE`,
+  never another product's text. The `gemini_plus` guide text is unchanged. The `pro` guide text is a draft:
+  confirm warranty/password-change policy with the owner before relying on it.
+- Add a guide for a new product by adding an entry to `GUIDES` in `product_guides.py`.
+
 ## Checks and outstanding security task
 
 - Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.
