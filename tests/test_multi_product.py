@@ -93,7 +93,9 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         text = render.await_args.args[1]
         self.assertIn("HẾT HÀNG", text)
         datas = [b.callback_data for b in buttons(render.await_args.kwargs["reply_markup"])]
-        self.assertEqual(datas, ["main_menu"])
+        # the product intro stays visible (with its own guide), but nothing can be bought
+        self.assertEqual(datas, [f"gd:{PRO}", "main_menu"])
+        self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", text)
 
     async def test_sold_out_button_only_alerts(self):
         query = make_query(f"soldout_{PRO}")
@@ -110,7 +112,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", render.await_args.args[1])
         self.assertIn("Gmail|password", render.await_args.args[1])
         datas = [b.callback_data for b in buttons(render.await_args.kwargs["reply_markup"])]
-        self.assertEqual(datas, [f"sq:{PRO}:1", "main_menu"])
+        self.assertEqual(datas, [f"sq:{PRO}:1", f"gd:{PRO}", "main_menu"])
 
     def test_callback_data_fits_telegram_limit_and_old_plus_format_is_unchanged(self):
         self.assertEqual(shop_bot.cb_qty("select", PLUS, 4), "select_qty_4")

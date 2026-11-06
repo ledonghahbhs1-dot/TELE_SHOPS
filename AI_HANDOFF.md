@@ -76,6 +76,35 @@ The AGY source was recovered from `D:\gpl\shop_bot.py`; the active copy is
 - Still `gemini_plus` only: `/setprice`, `/addstock`, admin panel stock/revenue views, `/setusdt`, guide screen.
   Stock for other SKUs is managed on the Wolfmod dashboard.
 
+## Orders and guides per product (feat/orders-guides-per-product-v2, task 017)
+
+- The main menu has only an "Đơn Hàng VIP Của Tôi" button (`my_orders`); the welcome/main screens show no orders
+  and no guide text. Pressing it shows the customer's own delivered orders (completed only, newest first,
+  5 per page via `ordp:<page>`), each with the product name taken from the order's SKU. Long order contents
+  are shortened so a page always fits Telegram's 4096-character limit.
+- Guides are per product, stored by SKU in `product_guides.py` (`GUIDES`). The old "Cẩm nang kích hoạt" text was
+  always the `gemini_plus` guide and is now only that entry (text unchanged). A guide is reachable only from the
+  product detail screen and from the orders list, via `gd:<sku>`, and only for products that have their own entry.
+  A product without an entry has no guide button (and `gd:<sku>` answers with a neutral notice); another product's
+  guide text is never shown. The legacy `guide` callback (old messages) shows a short notice.
+- Add a guide for a new product by adding an entry to `GUIDES`. The `gemini_pro_account` text is a draft: confirm
+  warranty/password-change policy with the owner before relying on it.
+
+## Compact main screen and per-product intro screens (feat/main-screen-products, task 018)
+
+- `/start` and `main_menu` show only a short WolfMod greeting (`welcome_message`) and one button per product,
+  then "Đơn Hàng VIP Của Tôi" and CSKH. No product pitch, no "SẢN PHẨM KHÁC" line, no guide button on the
+  main screen. The product buttons come from the web catalogue (task 015); a new product appears by itself.
+- Tapping a product opens that product's OWN intro screen (`render_product_intro`): price VND/USDT, description,
+  stock, max quantity, quantity/"Mua Ngay" buttons only when in stock, the product's guide button only when it
+  has a guide, back. Sold-out products still show the intro plus a "HẾT HÀNG" notice and no purchase buttons.
+- Intro content lives by SKU in `product_intros.py`. The long Gemini Plus pitch (price comparison, performance,
+  Gmail AI, creativity, 400 GB, family) was MOVED verbatim from the old welcome screen into
+  `gemini_plus_intro`. Other SKUs use `generic_intro` (name, description and price from the web); to give a
+  product a special intro add a function to `INTROS`.
+- Banner photos: caption is limited to 1024 characters; a longer intro is sent as a short-caption photo followed by
+  the full intro as its own message with the buttons (`send_product_screen`).
+
 ## Checks and outstanding security task
 
 - Investigation 2026-11-05: admin reported a VietQR payment for `TGSB74D2E96`.
