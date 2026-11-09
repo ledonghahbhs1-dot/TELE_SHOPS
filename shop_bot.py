@@ -600,8 +600,13 @@ def deliver_product(order_id, user_id):
     cursor.execute("""
     UPDATE orders 
     SET status = 'completed', item_delivered = ?, completed_at = ? 
-    WHERE order_id = ?
+    WHERE order_id = ? AND status != 'completed'
     """, (all_links_text, now, order_id))
+    if cursor.rowcount == 0:
+        # Another worker completed this order first: return exactly what it stored (never a second link).
+        row = cursor.execute("SELECT item_delivered FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+        conn.close()
+        return (row["item_delivered"] or "").splitlines() or None
 
     conn.commit()
     conn.close()
@@ -1023,6 +1028,25 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str], sk
         f"{vip_em('party', '🎉')} {t(lang, 'deliv_success', order_id=oid)}\n\n"
         f"{vip_em('check', '✅')} {t(lang, 'deliv_confirmed')}\n"
     )
+    if product_content.field(sku, "delivery_kind", lang) == "offer_link":
+        # Offer link (1 link/đơn): hiển thị link + nút mở + hướng dẫn; chỉ tạo nút url khi thật sự là http(s).
+        links = [str(x).strip() for x in delivered_links if str(x).strip()]
+        link_lines = "\n".join(f"<code>{html.escape(x)}</code>" for x in links)
+        msg = (
+            head +
+            f"{vip_em('box', '📦')} <b>{t(lang, 'deliv_product')}:</b> {html.escape(sku_title(sku, lang))}\n"
+            f"{vip_em('key', '🔗')} {t(lang, 'offer_title', n=len(links))}\n"
+            f"{link_lines}\n\n"
+            f"{vip_em('diamond', '💎')} {t(lang, 'offer_howto_title')}\n"
+            f"{vip_em('num1', '1️⃣')} {t(lang, 'offer_step1')}\n"
+            f"{vip_em('num2', '2️⃣')} {t(lang, 'offer_step2')}\n"
+            f"{vip_em('num3', '3️⃣')} {t(lang, 'offer_step3')}\n\n"
+            f"{vip_em('shield', '⚠️')} {t(lang, 'offer_single_use')}"
+        )
+        buttons = [[vip_btn(t(lang, "btn_open_offer"), url=x, emoji_name="crown", style="primary")]
+                   for x in links if x.lower().startswith(("https://", "http://"))]
+        return msg, buttons + [[my_orders_btn], [back_btn]]
+
     if sku != DEFAULT_SKU:
         # Tài khoản/nội dung không phải URL: không tạo nút url (Telegram sẽ từ chối), chỉ hiển thị dạng code.
         items_text = "\n".join(f"<code>{html.escape(item)}</code>" for item in delivered_links)

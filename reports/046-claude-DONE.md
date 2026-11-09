@@ -4,7 +4,7 @@ Branch: `feat/bot-i18n-chatgpt-go` (từ `origin/main` 206cac6; không đụng `
 
 ## Kết quả kiểm thử (số thật)
 - Baseline trước khi sửa: `python -m unittest discover -s tests` → 102 test, `OK`, exit code **0**.
-- Sau khi sửa: `python -m unittest discover -s tests` → **137 test, OK, exit code 0** (102 cũ + 35 mới trong `tests/test_i18n.py`).
+- Sau khi sửa: `python -m unittest discover -s tests` → **145 test, OK, exit code 0** (102 cũ + 35 trong `tests/test_i18n.py` + 8 trong `tests/test_offer_delivery.py`).
 - Test hạ tầng: `tests/test_i18n.py` chặn `urllib.request.urlopen` (không gọi web/Telegram thật), dùng SQLite tạm (không đụng DB production), không đọc env/token.
 - Test cũ phải sửa có chủ đích (menu chính đã đổi, trang sản phẩm dựng từ dữ liệu): `test_main_screen`, `test_multi_product`, `test_auto_discover`, `test_orders_guides` (+1 dòng `default_lang=vi` ở setUp các file cũ để chúng tiếp tục kiểm tra giao diện tiếng Việt).
 
@@ -27,13 +27,16 @@ Branch: `feat/bot-i18n-chatgpt-go` (từ `origin/main` 206cac6; không đụng `
 ## Cách Goof nhập kho ChatGPT Go
 Bot không có kho riêng cho SKU này; kho nằm trên web. Cần: (1) tạo sản phẩm loại `item` trên Wolfmod dashboard với **SKU `chatgpt_go_3m`**, giá 100000, max_qty 1; (2) nhập kho (tài khoản/link/mã, mỗi dòng một mục) ở tab TG Sales. Trước đó bot hiển thị sản phẩm "HẾT HÀNG" và không cho mua.
 
-## Nội dung ChatGPT Go — **CẦN GOOF DUYỆT**
-Nguồn: OpenAI Help Center "What is ChatGPT Go?" https://help.openai.com/en/articles/11989085-what-is-chatgpt-go , tra cứu **2026-11-09**. OpenAI có nhiều phiên bản bài viết, tính năng/giới hạn có thể đổi — cần kiểm tra lại trang trực tiếp. Đã chỉ ghi các ý có trong nguồn (gắn "theo OpenAI"): gói giá thấp mở rộng quyền so với Free; hạn mức cao hơn cho tạo ảnh/tải tệp/phân tích dữ liệu; "Think" trên web & mobile; chế độ giọng nói hạn mức như Free; không gồm mô hình legacy, Sora, API; có thể có quảng cáo. Cờ `needs_owner_approval: true` trong `product_content.json`. Cách giao hàng (tài khoản / link kích hoạt / mã) **chưa biết**; bảo hành **để trống (không hiển thị)**; chưa có hướng dẫn riêng (không bịa).
+## Nội dung ChatGPT Go — cập nhật theo thông tin thật của Goof (follow-up)
+- **Giao hàng = OFFER LINK**: mỗi đơn nhận đúng 1 link từ kho; tin giao hàng có link, nút "Mở Offer Link" và hướng dẫn (mở link → đăng nhập ChatGPT → làm theo màn hình kích hoạt; link dùng một lần). Có thêm hướng dẫn riêng `gd:chatgpt_go_3m`.
+- **4 lợi ích** đúng ý Goof (vi) và bản en dịch sát nghĩa, không thêm tính năng nào. Đã bỏ nội dung suy ra từ trang OpenAI và cờ "CẦN DUYỆT" (`needs_owner_approval: false`).
+- **Bảo hành: Goof CHƯA cung cấp chính sách bảo hành** → không bịa; trang chỉ ghi "Liên hệ CSKH nếu link lỗi" (trường `warranty` để trống, ghi nhận trong `owner_todo`).
+- **Idempotent**: kho/claim nằm trên web (atomic theo mã đơn, trả lại đúng bundle khi gọi lại). Phía bot đã thêm `UPDATE ... WHERE status != 'completed'` để hai tiến trình cùng giao một đơn không ghi đè; gọi lại luôn trả đúng link đã giao. Test với kho giả (`FakeWebStock`): bấm/webhook lặp → 1 link, 1 tin nhắn Telegram; 6 đơn song song với 3 link → 3 link khác nhau, 3 đơn không có link; 8 luồng cùng 1 đơn → đúng 1 link trừ kho; hết link → `sq:`/`cv:` bị chặn, không tạo đơn, không gọi claim; link cuối bán được một lần rồi hết hàng.
 
 ## Câu hỏi Goof cần chọn
 1. **Gom menu**: đã hiểu "Mua hàng" = một mục chứa cả 3 sản phẩm (Google AI Plus, Gemini Pro, ChatGPT Go). Đúng ý chưa? Nút danh sách vẫn ghi giá/kho trên từng nút.
 2. **Ngôn ngữ mặc định**: khách mới = English, khách đã có đơn = Tiếng Việt. Muốn mặc định khác (vd. tất cả vi) → đặt `default_lang`.
-3. **Duyệt nội dung ChatGPT Go** (quyền lợi EN/VI) và **cách giao** (tài khoản / link / mã) + **chính sách bảo hành**.
+3. **Chính sách bảo hành ChatGPT Go** (chưa có; hiện chỉ ghi "Liên hệ CSKH nếu link lỗi").
 4. **SKU**: dùng `chatgpt_go_3m` OK không? (nếu đổi, sửa khóa trong `product_content.json`). Cần tạo sản phẩm tương ứng trên web.
 5. **Người nhận thông báo kho**: giữ admin + kênh, hay bật gửi cho mọi khách (`stock_notify_customers=true`)? Kênh dùng ngôn ngữ nào (`notify_channel_lang`)?
 6. **Tin nhập kho cũ bên web** (admin-only, in mã kỹ thuật): tắt hoặc đổi cùng định dạng mới? (cần task bên web)

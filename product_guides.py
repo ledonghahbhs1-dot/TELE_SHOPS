@@ -83,6 +83,36 @@ GUIDES: dict[str, dict[str, dict]] = {
             ],
         },
     },
+    "chatgpt_go_3m": {
+        "vi": {
+            "title": "HƯỚNG DẪN KÍCH HOẠT CHATGPT GO",
+            "intro": "Sau khi thanh toán, bot gửi 1 offer link (link ưu đãi) cho mỗi đơn:",
+            "steps": [
+                "Mở offer link nhận được từ bot.",
+                "Đăng nhập tài khoản ChatGPT của bạn.",
+                "Làm theo màn hình kích hoạt để nhận gói ChatGPT Go.",
+            ],
+            "notes_title": "Lưu ý:",
+            "notes": [
+                ("shield", "✦", "Link chỉ dùng được một lần, đừng chia sẻ cho người khác."),
+                ("chat", "✦", "Link lỗi: liên hệ CSKH kèm mã đơn hàng."),
+            ],
+        },
+        "en": {
+            "title": "CHATGPT GO ACTIVATION GUIDE",
+            "intro": "After payment the bot sends 1 offer link per order:",
+            "steps": [
+                "Open the offer link you received from the bot.",
+                "Sign in to your ChatGPT account.",
+                "Follow the activation screen to get your ChatGPT Go plan.",
+            ],
+            "notes_title": "Notes:",
+            "notes": [
+                ("shield", "✦", "The link works only once, do not share it."),
+                ("chat", "✦", "If the link fails: contact support with your order ID."),
+            ],
+        },
+    },
 }
 
 

@@ -131,9 +131,13 @@ class CatalogueTests(unittest.TestCase):
 
     def test_chatgpt_go_content_is_flagged_for_owner_approval_with_source(self):
         gpt = product_content.get(GPT)
-        self.assertTrue(gpt["needs_owner_approval"])
-        self.assertIn("help.openai.com", gpt["source"])
-        self.assertIn("2026-11-09", gpt["source"])
+        self.assertFalse(gpt["needs_owner_approval"])      # content now supplied by Goof
+        self.assertEqual(gpt["delivery_kind"], "offer_link")
+        self.assertIsNone(gpt["warranty"])                  # no warranty policy supplied: nothing invented
+        self.assertIn("Liên hệ CSKH nếu link lỗi", gpt["notes"]["vi"][0])
+        self.assertEqual(len(gpt["features"]["vi"]), 4)
+        self.assertEqual(len(gpt["features"]["en"]), 4)
+        self.assertIn("GPT-5", gpt["features"]["en"][1])
         self.assertEqual(product_content.price_fallback(GPT), 100000)
 
     def test_guides_exist_in_both_languages(self):
@@ -376,8 +380,8 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("PAYMENT SUCCESSFUL", en)
         self.assertIn("Activation in 3 steps", en)
         self.assertIn("Open VIP Activation Link", texts(SimpleNamespace(inline_keyboard=buttons)))
-        acct, _ = shop_bot.format_delivered_links_message("TGS2", ["a@gmail.com|pw"], GPT, "en")
-        self.assertIn("ChatGPT Go – 3 Months", acct)
+        acct, _ = shop_bot.format_delivered_links_message("TGS2", ["a@gmail.com|pw"], PRO, "en")
+        self.assertIn("GEMINI PRO ACCOUNT", acct)
         self.assertIn("Delivery details (1)", acct)
 
     def test_orders_page_and_guides_follow_language(self):
@@ -395,7 +399,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Hướng dẫn:", texts(markup_vi)[0])
         self.assertIn("Step 1", shop_bot.render_guide(PRO, "en"))
         self.assertIn("Bước 1", shop_bot.render_guide(PRO, "vi"))
-        self.assertIsNone(shop_bot.render_guide(GPT, "en"))   # no guide invented for ChatGPT Go
+        self.assertIn("Sign in to your ChatGPT account", shop_bot.render_guide(GPT, "en"))
 
     # ---------- ChatGPT Go ----------
     async def test_chatgpt_go_detail_page_shows_100000_vnd_and_4_00_usd_in_both_languages(self):
@@ -439,7 +443,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(query.answer.await_args.args[0])
                 _, render = await self.click(f"buy_{GPT}")               # opening the page directly: still no purchase
                 self.assertIn(notice, plain(render.await_args.args[1]))
-                self.assertEqual(datas(render.await_args.kwargs["reply_markup"]), ["shop"])
+                self.assertEqual(datas(render.await_args.kwargs["reply_markup"]), [f"gd:{GPT}", "shop"])  # guide + back, no purchase
                 query, render = await self.click(f"sq:{GPT}:1")          # forged/old quantity button: blocked
                 render.assert_not_awaited()
                 self.assertTrue(query.answer.await_args.kwargs.get("show_alert"))

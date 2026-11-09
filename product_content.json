@@ -95,9 +95,9 @@
     "owner_todo": "Chính sách bảo hành chưa có nên không hiển thị; Goof điền vào 'warranty' khi xác nhận."
   },
   "chatgpt_go_3m": {
-    "needs_owner_approval": true,
+    "needs_owner_approval": false,
     "price_vnd_fallback": 100000,
-    "source": "https://help.openai.com/en/articles/11989085-what-is-chatgpt-go (OpenAI Help Center, 'What is ChatGPT Go?'), tra cứu ngày 2026-11-09. CẦN GOOF DUYỆT trước khi bán. Không có tuyên bố nào ngoài trang chính thức; OpenAI có nhiều phiên bản bài viết và có thể đổi giới hạn/mô hình – kiểm tra lại trang trực tiếp.",
+    "source": "Thông tin do Goof cung cấp (task 046 follow-up): giao bằng offer link; 4 lợi ích như bên dưới. Chưa có chính sách bảo hành.",
     "name": {
       "vi": "CHATGPT GO 3 THÁNG",
       "en": "ChatGPT Go – 3 Months"
@@ -112,37 +112,34 @@
     },
     "features": {
       "vi": [
-        "Gói ChatGPT Go của OpenAI: giá thấp, mở rộng quyền dùng so với bản Miễn phí",
-        "Hạn mức cao hơn cho tạo ảnh, tải tệp và phân tích dữ liệu (theo OpenAI)",
-        "Có chế độ suy luận “Think” trên web và ứng dụng di động (theo OpenAI)",
-        "Có chế độ giọng nói, hạn mức như gói Miễn phí (theo OpenAI)",
-        "Không bao gồm: mô hình cũ (legacy), Sora, API (API tính phí riêng) – theo OpenAI"
+        "Quyền truy cập nhiều hơn vào các công cụ thiết yếu",
+        "Thêm quyền truy cập vào GPT-5: dùng nhiều tin nhắn tự động GPT-5 hơn để viết, học và giải quyết các vấn đề hằng ngày",
+        "Giới hạn sử dụng cao hơn: tải lên nhiều tệp hơn, làm việc với tài liệu lớn hơn và tạo nhiều hình ảnh hơn",
+        "Bộ nhớ và ngữ cảnh dài hơn: cửa sổ ngữ cảnh dài hơn giúp ChatGPT ghi nhớ các điểm chính và tiếp tục công việc ngay từ nơi đã dừng"
       ],
       "en": [
-        "OpenAI's ChatGPT Go plan: low-cost, with expanded access compared to the Free plan",
-        "Higher limits for image generation, file uploads and data analysis (per OpenAI)",
-        "\"Think\" reasoning available on web and the mobile app (per OpenAI)",
-        "Voice mode included, with the same limits as the Free plan (per OpenAI)",
-        "Not included: legacy models, Sora, API usage (API is billed separately) – per OpenAI"
+        "More access to essential tools",
+        "More access to GPT-5: use more automatic GPT-5 messages to write, learn and solve everyday problems",
+        "Higher usage limits: upload more files, work with larger documents and create more images",
+        "Longer memory and context: a longer context window helps ChatGPT remember key points and pick up your work right where you left off"
       ]
     },
     "delivery": {
-      "vi": "Thông tin nhận hàng được bot gửi tự động trong tin nhắn riêng sau khi thanh toán được xác nhận.",
-      "en": "Your delivery details are sent automatically by the bot in a private message once payment is confirmed."
+      "vi": "Mỗi đơn nhận 1 offer link (link ưu đãi) từ kho, bot gửi tự động sau khi thanh toán được xác nhận. Mở link, đăng nhập tài khoản ChatGPT của bạn và làm theo màn hình kích hoạt. Link chỉ dùng được một lần.",
+      "en": "Each order gets 1 offer link from stock, sent automatically by the bot once payment is confirmed. Open the link, sign in to your ChatGPT account and follow the activation screen. The link works only once."
     },
     "warranty": null,
     "notes": {
       "vi": [
-        "Tính năng và giới hạn do OpenAI quyết định và có thể thay đổi; có thể có quảng cáo ở một số khu vực (theo OpenAI).",
-        "Cần hỗ trợ: liên hệ CSKH kèm mã đơn hàng."
+        "Liên hệ CSKH nếu link lỗi (kèm mã đơn hàng)."
       ],
       "en": [
-        "Features and limits are set by OpenAI and may change; ads may appear in some regions (per OpenAI).",
-        "Need help? Contact support with your order ID."
+        "Contact support if the link fails (include your order ID)."
       ]
     },
-    "owner_todo": "CẦN GOOF XÁC NHẬN: (1) cách giao ChatGPT Go là tài khoản / link kích hoạt / mã; (2) chính sách bảo hành (đang để trống, không hiển thị); (3) duyệt toàn bộ nội dung quyền lợi.",
-    "usd_from_rate": true
+    "owner_todo": "Goof chưa cung cấp chính sách bảo hành: trang chỉ ghi 'Liên hệ CSKH nếu link lỗi'. Điền 'warranty' khi có.",
+    "usd_from_rate": true,
+    "delivery_kind": "offer_link"
   },
   "_usd_from_rate": "usd_from_rate=true: nếu web chưa có giá USDT của SKU, bot hiển thị giá USD = giá VNĐ / 25.000 (không tự đặt giá USDT khi thanh toán – hóa đơn Plisio do web tính)."
 }

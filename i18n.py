@@ -344,6 +344,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Tap 'Start trial' or 'Get offer' (2TB).",
     },
     "deliv_step3": {"vi": "Hoàn tất xác nhận trên Google One.", "en": "Finish the confirmation on Google One."},
+    "offer_title": {"vi": "<b>Offer link của bạn ({n}):</b>", "en": "<b>Your offer link ({n}):</b>"},
+    "offer_howto_title": {"vi": "<b>Cách kích hoạt:</b>", "en": "<b>How to activate:</b>"},
+    "offer_step1": {"vi": "Mở offer link.", "en": "Open the offer link."},
+    "offer_step2": {"vi": "Đăng nhập tài khoản ChatGPT của bạn.", "en": "Sign in to your ChatGPT account."},
+    "offer_step3": {"vi": "Làm theo màn hình kích hoạt.", "en": "Follow the activation screen."},
+    "offer_single_use": {"vi": "Link chỉ dùng được một lần. Link lỗi: liên hệ @wolfmodyt kèm mã đơn.", "en": "The link works only once. If it fails, contact @wolfmodyt with your order ID."},
+    "btn_open_offer": {"vi": "Mở Offer Link", "en": "Open Offer Link"},
     "btn_open_link": {"vi": "Mở Link Kích Hoạt VIP", "en": "Open VIP Activation Link"},
     "btn_open_link_n": {"vi": "Mở Link #{idx}", "en": "Open Link #{idx}"},
 
