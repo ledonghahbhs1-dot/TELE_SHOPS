@@ -1,0 +1,504 @@
+{
+  "vi": [
+    {
+      "title": "Main menu (/start)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>WOLFMOD VIP STORE</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <i>Kính chào Quý Khách VIP</i> <b>Minh</b> <i>đến với hệ thống dịch vụ số cao cấp!</i>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Chọn một mục bên dưới:</i>",
+      "buttons": [
+        [
+          {
+            "text": "Mua hàng",
+            "callback_data": "shop",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Đơn Hàng VIP Của Tôi",
+            "callback_data": "my_orders",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "CSKH Trực Tuyến 24/7",
+            "callback_data": "support",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Ngôn ngữ: Tiếng Việt",
+            "callback_data": "lang_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Language picker (/language)",
+      "text": "<b>Chọn ngôn ngữ</b>\nChoose your language",
+      "buttons": [
+        [
+          {
+            "text": "Tiếng Việt",
+            "callback_data": "setlang:vi",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "English",
+            "callback_data": "setlang:en",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Trở Về Sảnh VIP",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Shop: ChatGPT Go OUT OF STOCK",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>MUA HÀNG</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Chọn sản phẩm để xem chi tiết (đầy đủ quyền lợi, giá VNĐ/USD, bảo hành):</i>",
+      "buttons": [
+        [
+          {
+            "text": "MUA GOOGLE AI PLUS 12 THÁNG • 14,999 VNĐ (Kho: 293)",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "MUA ACCOUNT GEMINI PRO FULL BENEFITS • 125,000 VNĐ",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "CHATGPT GO 3 THÁNG • 100,000 VNĐ • HẾT HÀNG",
+            "callback_data": "soldout_chatgpt_go_3m",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Trở Về Sảnh VIP",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "ChatGPT Go page: OUT OF STOCK",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>CHATGPT GO 3 THÁNG</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Thời hạn:</b> 3 Tháng\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> <b>100,000 VNĐ (≈ 4.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Quyền lợi:</b>\n• Gói ChatGPT Go của OpenAI: giá thấp, mở rộng quyền dùng so với bản Miễn phí\n• Hạn mức cao hơn cho tạo ảnh, tải tệp và phân tích dữ liệu (theo OpenAI)\n• Có chế độ suy luận “Think” trên web và ứng dụng di động (theo OpenAI)\n• Có chế độ giọng nói, hạn mức như gói Miễn phí (theo OpenAI)\n• Không bao gồm: mô hình cũ (legacy), Sora, API (API tính phí riêng) – theo OpenAI\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Cách giao hàng:</b> Thông tin nhận hàng được bot gửi tự động trong tin nhắn riêng sau khi thanh toán được xác nhận.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Lưu ý:</b>\n• Tính năng và giới hạn do OpenAI quyết định và có thể thay đổi; có thể có quảng cáo ở một số khu vực (theo OpenAI).\n• Cần hỗ trợ: liên hệ CSKH kèm mã đơn hàng.\n\n<tg-emoji emoji-id=\"5778527486270770928\">❌</tg-emoji> <b>Hiện sản phẩm đang HẾT HÀNG.</b> Vui lòng quay lại sau hoặc liên hệ CSKH VIP.",
+      "buttons": []
+    },
+    {
+      "title": "Shop: ChatGPT Go in stock",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>MUA HÀNG</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Chọn sản phẩm để xem chi tiết (đầy đủ quyền lợi, giá VNĐ/USD, bảo hành):</i>",
+      "buttons": [
+        [
+          {
+            "text": "MUA GOOGLE AI PLUS 12 THÁNG • 14,999 VNĐ (Kho: 293)",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "MUA ACCOUNT GEMINI PRO FULL BENEFITS • 125,000 VNĐ",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "MUA CHATGPT GO 3 THÁNG • 100,000 VNĐ",
+            "callback_data": "buy_chatgpt_go_3m",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Trở Về Sảnh VIP",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "ChatGPT Go page: in stock",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>CHATGPT GO 3 THÁNG</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Thời hạn:</b> 3 Tháng\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> <b>100,000 VNĐ (≈ 4.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Quyền lợi:</b>\n• Gói ChatGPT Go của OpenAI: giá thấp, mở rộng quyền dùng so với bản Miễn phí\n• Hạn mức cao hơn cho tạo ảnh, tải tệp và phân tích dữ liệu (theo OpenAI)\n• Có chế độ suy luận “Think” trên web và ứng dụng di động (theo OpenAI)\n• Có chế độ giọng nói, hạn mức như gói Miễn phí (theo OpenAI)\n• Không bao gồm: mô hình cũ (legacy), Sora, API (API tính phí riêng) – theo OpenAI\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Cách giao hàng:</b> Thông tin nhận hàng được bot gửi tự động trong tin nhắn riêng sau khi thanh toán được xác nhận.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Lưu ý:</b>\n• Tính năng và giới hạn do OpenAI quyết định và có thể thay đổi; có thể có quảng cáo ở một số khu vực (theo OpenAI).\n• Cần hỗ trợ: liên hệ CSKH kèm mã đơn hàng.\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Tồn kho:</b> <code>5 sẵn sàng</code>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Tối đa mỗi đơn:</b> 1\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Bấm bên dưới để tiếp tục:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Google AI Plus page",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>Google AI Plus 400GB (12 Tháng)</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Thời hạn:</b> 12 Tháng (1 Năm trọn vẹn)\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> <b>14,999 VNĐ (≈ 0.60 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Quyền lợi:</b>\n• Gemini 3.6 Flash, Deep Research, hạn mức x2\n• Trợ lý Gemini hỗ trợ hiệu đính trong Gmail\n• Mở rộng tạo ảnh, nhạc, video &amp; Gemini Notebook\n• Bộ nhớ 400 GB dùng chung Gmail, Google Drive, Google Photos\n• Chia sẻ tối đa 5 thành viên gia đình\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Cách giao hàng:</b> Bot gửi link kích hoạt ngay sau khi thanh toán được xác nhận.\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Bảo hành:</b> Bảo hành 24h (1 đổi 1 siêu tốc)\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Lưu ý:</b>\n• Giá gốc Google: 132.000 ₫/tháng (1.584.000 ₫ / 12 tháng).\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Tồn kho:</b> <code>293 sẵn sàng</code>\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Vui lòng bấm chọn số lượng bạn muốn mua bên dưới:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Gemini Pro Account page",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>ACCOUNT GEMINI PRO FULL BENEFITS</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> <b>125,000 VNĐ (≈ 5.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Quyền lợi:</b>\n• Google AI Pro với Gemini 4 Argon\n• Quyền truy cập mở rộng Gemini 3.1 Pro và Deep Research\n• Tạo ảnh, nhạc, video; Gemini Notebook\n• Google AI Studio, Antigravity, Colab\n• Bộ nhớ dùng chung 5 TB\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Cách giao hàng:</b> Tài khoản dạng Gmail|password gửi trong tin nhắn riêng sau khi thanh toán được xác nhận.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Lưu ý:</b>\n• Quyền lợi có thể thay đổi theo khu vực và điều khoản của Google.\n• Cần hỗ trợ: liên hệ CSKH kèm mã đơn hàng.\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Tồn kho:</b> <code>1 sẵn sàng</code>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Tối đa mỗi đơn:</b> 1\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Bấm bên dưới để tiếp tục:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Stock-in notification: CHATGPT GO 3 THÁNG",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>HÀNG MỚI VỀ KHO</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>CHATGPT GO 3 THÁNG</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Vừa nhập thêm <b>+3</b>\n\n• Gói ChatGPT Go của OpenAI: giá thấp, mở rộng quyền dùng so với bản Miễn phí\n• Hạn mức cao hơn cho tạo ảnh, tải tệp và phân tích dữ liệu (theo OpenAI)\n• Có chế độ suy luận “Think” trên web và ứng dụng di động (theo OpenAI)\n• Có chế độ giọng nói, hạn mức như gói Miễn phí (theo OpenAI)\n• Không bao gồm: mô hình cũ (legacy), Sora, API (API tính phí riêng) – theo OpenAI\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> 100,000 VNĐ (≈ 4.00 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Kho khả dụng:</b> <code>8 sẵn sàng</code>",
+      "buttons": [
+        [
+          {
+            "text": "Mua ngay",
+            "callback_data": "buy_chatgpt_go_3m",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Stock-in notification: ACCOUNT GEMINI PRO FULL BENEFITS",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>HÀNG MỚI VỀ KHO</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>ACCOUNT GEMINI PRO FULL BENEFITS</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Vừa nhập thêm <b>+3</b>\n\n• Google AI Pro với Gemini 4 Argon\n• Quyền truy cập mở rộng Gemini 3.1 Pro và Deep Research\n• Tạo ảnh, nhạc, video; Gemini Notebook\n• Google AI Studio, Antigravity, Colab\n• Bộ nhớ dùng chung 5 TB\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> 125,000 VNĐ (≈ 5.00 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Kho khả dụng:</b> <code>8 sẵn sàng</code>",
+      "buttons": [
+        [
+          {
+            "text": "Mua ngay",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Stock-in notification: Google AI Plus 400GB (12 Tháng)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>HÀNG MỚI VỀ KHO</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>Google AI Plus 400GB (12 Tháng)</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Vừa nhập thêm <b>+3</b>\n\n• Gemini 3.6 Flash, Deep Research, hạn mức x2\n• Trợ lý Gemini hỗ trợ hiệu đính trong Gmail\n• Mở rộng tạo ảnh, nhạc, video &amp; Gemini Notebook\n• Bộ nhớ 400 GB dùng chung Gmail, Google Drive, Google Photos\n• Chia sẻ tối đa 5 thành viên gia đình\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Giá:</b> 14,999 VNĐ (≈ 0.60 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Kho khả dụng:</b> <code>8 sẵn sàng</code>",
+      "buttons": [
+        [
+          {
+            "text": "Mua ngay",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Delivery message (Google AI Plus)",
+      "text": "<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>TGS1A2B3C4D</code>!</b>\n\n<tg-emoji emoji-id=\"5776375003280838798\">✅</tg-emoji> Hệ thống đã xác nhận thanh toán của bạn.\n<tg-emoji emoji-id=\"6005570495603282482\">🔑</tg-emoji> <b>Link nhận Google AI Plus 400GB (12 Tháng - BH 24h):</b>\n<code>https://one.google.com/offer/EXAMPLE</code>\n\n<tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>Hướng dẫn kích hoạt 3 bước:</b>\n<tg-emoji emoji-id=\"5798769667136819756\">1️⃣</tg-emoji> Mở link trên trình duyệt có Gmail cá nhân của bạn.\n<tg-emoji emoji-id=\"5960582701747539918\">2️⃣</tg-emoji> Bấm 'Bắt đầu dùng thử' hoặc 'Nhận ưu đãi' 2TB.\n<tg-emoji emoji-id=\"5798927915206840847\">3️⃣</tg-emoji> Hoàn tất xác nhận trên Google One.\n\n<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> Cảm ơn Quý Khách đã tin tưởng dịch vụ VIP của WolfMod!",
+      "buttons": [
+        [
+          {
+            "text": "Mở Link Kích Hoạt VIP",
+            "callback_data": null,
+            "url": "https://one.google.com/offer/EXAMPLE"
+          }
+        ],
+        [
+          {
+            "text": "Đơn Hàng Của Tôi",
+            "callback_data": "my_orders",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Trở Về Sảnh VIP",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "VietQR invoice (ChatGPT Go)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>HÓA ĐƠN GIAO DỊCH VIETQR VIP</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5843478103434728287\">🏷</tg-emoji> <b>Mã đơn hàng VIP:</b> <code>TGS1A2B3C4D</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Dịch vụ:</b> CHATGPT GO 3 THÁNG\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>Số lượng:</b> <b>1</b>\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Số tiền cần thanh toán:</b> <code>100,000 VNĐ</code>\n\n<tg-emoji emoji-id=\"5967548335542767952\">🏦</tg-emoji> <b>Ngân hàng:</b> <code>ACB</code> (Ngân Hàng Á Châu)\n<tg-emoji emoji-id=\"5967548335542767952\">💳</tg-emoji> <b>Số tài khoản:</b> <code>00000000</code>\n<tg-emoji emoji-id=\"5771887475421090729\">👤</tg-emoji> <b>Chủ tài khoản:</b> <code>EXAMPLE</code>\n<tg-emoji emoji-id=\"5897737086710059363\">📝</tg-emoji> <b>Nội dung chuyển khoản:</b> <code>TGS1A2B3C4D</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Thời hạn thanh toán:</b> <b>10 phút</b> (Hết hạn lúc: <code>14:30:00</code>)\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Mẹo VIP: Quét mã QR ACB phía trên trên App ngân hàng để hệ thống tự điền đúng STK &amp; Nội dung!</i>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <i>Lưu ý: Đơn hàng sẽ tự động hủy sau 10 phút nếu chưa hoàn tất chuyển tiền.</i>",
+      "buttons": [
+        [
+          {
+            "text": "TÔI ĐÃ CHUYỂN KHOẢN XONG",
+            "callback_data": "confirm_pay_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Đổi Sang Thanh Toán USDT (4 USDT)",
+            "callback_data": "switch_pay_usdt_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "HỦY GIAO DỊCH NÀY",
+            "callback_data": "cancel_order_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "VỀ SẢNH MENU CHÍNH",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    }
+  ],
+  "en": [
+    {
+      "title": "Main menu (/start)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>WOLFMOD VIP STORE</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <i>Welcome, VIP customer</i> <b>Minh</b><i>, to our premium digital services store!</i>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Choose an option below:</i>",
+      "buttons": [
+        [
+          {
+            "text": "Shop",
+            "callback_data": "shop",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "My VIP Orders",
+            "callback_data": "my_orders",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "24/7 Live Support",
+            "callback_data": "support",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Language: English",
+            "callback_data": "lang_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Language picker (/language)",
+      "text": "<b>Choose your language</b>\nChọn ngôn ngữ",
+      "buttons": [
+        [
+          {
+            "text": "Tiếng Việt",
+            "callback_data": "setlang:vi",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "English",
+            "callback_data": "setlang:en",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Back to VIP Lobby",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Shop: ChatGPT Go OUT OF STOCK",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>SHOP</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Pick a product to see the full details (benefits, VND/USD price, warranty):</i>",
+      "buttons": [
+        [
+          {
+            "text": "BUY GOOGLE AI PLUS 12 MONTHS • 14,999 VNĐ (Stock: 293)",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "BUY GEMINI PRO ACCOUNT FULL BENEFITS • 125,000 VNĐ",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "CHATGPT GO 3 MONTHS • 100,000 VNĐ • OUT OF STOCK",
+            "callback_data": "soldout_chatgpt_go_3m",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Back to VIP Lobby",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "ChatGPT Go page: OUT OF STOCK",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>ChatGPT Go – 3 Months</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Duration:</b> 3 months\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> <b>100,000 VNĐ (≈ 4.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Benefits:</b>\n• OpenAI&#x27;s ChatGPT Go plan: low-cost, with expanded access compared to the Free plan\n• Higher limits for image generation, file uploads and data analysis (per OpenAI)\n• &quot;Think&quot; reasoning available on web and the mobile app (per OpenAI)\n• Voice mode included, with the same limits as the Free plan (per OpenAI)\n• Not included: legacy models, Sora, API usage (API is billed separately) – per OpenAI\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Delivery:</b> Your delivery details are sent automatically by the bot in a private message once payment is confirmed.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Notes:</b>\n• Features and limits are set by OpenAI and may change; ads may appear in some regions (per OpenAI).\n• Need help? Contact support with your order ID.\n\n<tg-emoji emoji-id=\"5778527486270770928\">❌</tg-emoji> <b>This product is currently OUT OF STOCK.</b> Please check back later or contact VIP support.",
+      "buttons": []
+    },
+    {
+      "title": "Shop: ChatGPT Go in stock",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>SHOP</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <i>Pick a product to see the full details (benefits, VND/USD price, warranty):</i>",
+      "buttons": [
+        [
+          {
+            "text": "BUY GOOGLE AI PLUS 12 MONTHS • 14,999 VNĐ (Stock: 293)",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "BUY GEMINI PRO ACCOUNT FULL BENEFITS • 125,000 VNĐ",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "BUY CHATGPT GO 3 MONTHS • 100,000 VNĐ",
+            "callback_data": "buy_chatgpt_go_3m",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Back to VIP Lobby",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "ChatGPT Go page: in stock",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>ChatGPT Go – 3 Months</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Duration:</b> 3 months\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> <b>100,000 VNĐ (≈ 4.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Benefits:</b>\n• OpenAI&#x27;s ChatGPT Go plan: low-cost, with expanded access compared to the Free plan\n• Higher limits for image generation, file uploads and data analysis (per OpenAI)\n• &quot;Think&quot; reasoning available on web and the mobile app (per OpenAI)\n• Voice mode included, with the same limits as the Free plan (per OpenAI)\n• Not included: legacy models, Sora, API usage (API is billed separately) – per OpenAI\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Delivery:</b> Your delivery details are sent automatically by the bot in a private message once payment is confirmed.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Notes:</b>\n• Features and limits are set by OpenAI and may change; ads may appear in some regions (per OpenAI).\n• Need help? Contact support with your order ID.\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Stock:</b> <code>5 available</code>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Max per order:</b> 1\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Tap below to continue:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Google AI Plus page",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>Google AI Plus 400GB (12 Months)</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Duration:</b> 12 months (a full year)\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> <b>14,999 VNĐ (≈ 0.60 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Benefits:</b>\n• Gemini 3.6 Flash, Deep Research, 2x usage limits\n• Gemini assistant helps you proofread inside Gmail\n• Expanded image, music and video creation &amp; Gemini Notebook\n• 400 GB storage shared across Gmail, Google Drive, Google Photos\n• Share with up to 5 family members\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Delivery:</b> The bot sends your activation link right after payment is confirmed.\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Warranty:</b> 24h warranty (fast 1-for-1 replacement)\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Notes:</b>\n• Google&#x27;s list price: 132,000 VND/month (1,584,000 VND / 12 months).\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Stock:</b> <code>293 available</code>\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Please choose how many you want to buy below:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Gemini Pro Account page",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> <b>GEMINI PRO ACCOUNT – FULL BENEFITS</b> <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> <b>125,000 VNĐ (≈ 5.00 USD)</b>\n\n<tg-emoji emoji-id=\"5874948844935974490\">⭐️</tg-emoji> <b>Benefits:</b>\n• Google AI Pro with Gemini 4 Argon\n• Extended access to Gemini 3.1 Pro and Deep Research\n• Image, music and video creation; Gemini Notebook\n• Google AI Studio, Antigravity, Colab\n• 5 TB shared storage\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Delivery:</b> A Gmail|password account is sent in a private message once payment is confirmed.\n\n<tg-emoji emoji-id=\"5886666250158870040\">💬</tg-emoji> <b>Notes:</b>\n• Benefits may vary by region and Google&#x27;s terms.\n• Need help? Contact support with your order ID.\n\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Stock:</b> <code>1 available</code>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <b>Max per order:</b> 1\n\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>Tap below to continue:</i>",
+      "buttons": []
+    },
+    {
+      "title": "Stock-in notification: ChatGPT Go – 3 Months",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>NEW STOCK ARRIVED</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>ChatGPT Go – 3 Months</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Just restocked <b>+3</b>\n\n• OpenAI&#x27;s ChatGPT Go plan: low-cost, with expanded access compared to the Free plan\n• Higher limits for image generation, file uploads and data analysis (per OpenAI)\n• &quot;Think&quot; reasoning available on web and the mobile app (per OpenAI)\n• Voice mode included, with the same limits as the Free plan (per OpenAI)\n• Not included: legacy models, Sora, API usage (API is billed separately) – per OpenAI\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> 100,000 VNĐ (≈ 4.00 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Available stock:</b> <code>8 available</code>",
+      "buttons": [
+        [
+          {
+            "text": "Buy now",
+            "callback_data": "buy_chatgpt_go_3m",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Stock-in notification: GEMINI PRO ACCOUNT – FULL BENEFITS",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>NEW STOCK ARRIVED</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>GEMINI PRO ACCOUNT – FULL BENEFITS</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Just restocked <b>+3</b>\n\n• Google AI Pro with Gemini 4 Argon\n• Extended access to Gemini 3.1 Pro and Deep Research\n• Image, music and video creation; Gemini Notebook\n• Google AI Studio, Antigravity, Colab\n• 5 TB shared storage\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> 125,000 VNĐ (≈ 5.00 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Available stock:</b> <code>8 available</code>",
+      "buttons": [
+        [
+          {
+            "text": "Buy now",
+            "callback_data": "buy_gemini_pro_account",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Stock-in notification: Google AI Plus 400GB (12 Months)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>NEW STOCK ARRIVED</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>Google AI Plus 400GB (12 Months)</b>\n<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> Just restocked <b>+3</b>\n\n• Gemini 3.6 Flash, Deep Research, 2x usage limits\n• Gemini assistant helps you proofread inside Gmail\n• Expanded image, music and video creation &amp; Gemini Notebook\n• 400 GB storage shared across Gmail, Google Drive, Google Photos\n• Share with up to 5 family members\n\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Price:</b> 14,999 VNĐ (≈ 0.60 USD)\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Available stock:</b> <code>8 available</code>",
+      "buttons": [
+        [
+          {
+            "text": "Buy now",
+            "callback_data": "buy_gemini_plus",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "Delivery message (Google AI Plus)",
+      "text": "<tg-emoji emoji-id=\"5994502837327892086\">🎉</tg-emoji> <b>PAYMENT SUCCESSFUL FOR ORDER <code>TGS1A2B3C4D</code>!</b>\n\n<tg-emoji emoji-id=\"5776375003280838798\">✅</tg-emoji> Your payment has been confirmed.\n<tg-emoji emoji-id=\"6005570495603282482\">🔑</tg-emoji> <b>Your Google AI Plus 400GB link (12 months, 24h warranty):</b>\n<code>https://one.google.com/offer/EXAMPLE</code>\n\n<tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>Activation in 3 steps:</b>\n<tg-emoji emoji-id=\"5798769667136819756\">1️⃣</tg-emoji> Open the link in a browser signed in to your personal Gmail.\n<tg-emoji emoji-id=\"5960582701747539918\">2️⃣</tg-emoji> Tap 'Start trial' or 'Get offer' (2TB).\n<tg-emoji emoji-id=\"5798927915206840847\">3️⃣</tg-emoji> Finish the confirmation on Google One.\n\n<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> Thank you for trusting WolfMod VIP services!",
+      "buttons": [
+        [
+          {
+            "text": "Open VIP Activation Link",
+            "callback_data": null,
+            "url": "https://one.google.com/offer/EXAMPLE"
+          }
+        ],
+        [
+          {
+            "text": "My Orders",
+            "callback_data": "my_orders",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Back to VIP Lobby",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    },
+    {
+      "title": "VietQR invoice (ChatGPT Go)",
+      "text": "<tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji> ═══════ <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> <b>VIETQR VIP INVOICE</b> <tg-emoji emoji-id=\"5963312935148195483\">💎</tg-emoji> ═══════ <tg-emoji emoji-id=\"5807868868886009920\">👑</tg-emoji>\n\n<tg-emoji emoji-id=\"5843478103434728287\">🏷</tg-emoji> <b>VIP order ID:</b> <code>TGS1A2B3C4D</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id=\"5924720918826848520\">📦</tg-emoji> <b>Service:</b> ChatGPT Go – 3 Months\n<tg-emoji emoji-id=\"5874948844935974490\">✨</tg-emoji> <b>Quantity:</b> <b>1</b>\n<tg-emoji emoji-id=\"5811989245761426317\">💰</tg-emoji> <b>Amount to pay:</b> <code>100,000 VNĐ</code>\n\n<tg-emoji emoji-id=\"5967548335542767952\">🏦</tg-emoji> <b>Bank:</b> <code>ACB</code> (Asia Commercial Bank)\n<tg-emoji emoji-id=\"5967548335542767952\">💳</tg-emoji> <b>Account number:</b> <code>00000000</code>\n<tg-emoji emoji-id=\"5771887475421090729\">👤</tg-emoji> <b>Account holder:</b> <code>EXAMPLE</code>\n<tg-emoji emoji-id=\"5897737086710059363\">📝</tg-emoji> <b>Transfer note:</b> <code>TGS1A2B3C4D</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id=\"5967412305338568701\">📅</tg-emoji> <b>Payment deadline:</b> <b>10 minutes</b> (Expires at: <code>14:30:00</code>)\n<tg-emoji emoji-id=\"5843553939672274145\">⚡️</tg-emoji> <i>VIP tip: scan the ACB QR code above in your banking app to auto-fill the right account &amp; transfer note!</i>\n<tg-emoji emoji-id=\"5926783847453692661\">🛡</tg-emoji> <i>Note: the order is cancelled automatically after 10 minutes if the transfer is not completed.</i>",
+      "buttons": [
+        [
+          {
+            "text": "I HAVE PAID",
+            "callback_data": "confirm_pay_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "Switch to USDT Payment (4 USDT)",
+            "callback_data": "switch_pay_usdt_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "CANCEL THIS TRANSACTION",
+            "callback_data": "cancel_order_TGS1A2B3C4D",
+            "url": null
+          }
+        ],
+        [
+          {
+            "text": "BACK TO MAIN MENU",
+            "callback_data": "main_menu",
+            "url": null
+          }
+        ]
+      ]
+    }
+  ]
+}
