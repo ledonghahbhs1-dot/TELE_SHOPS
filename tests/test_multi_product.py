@@ -46,6 +46,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         shop_bot._web_stock_cache.clear()
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
+        shop_bot.set_setting("default_lang", "vi")  # legacy tests assert the Vietnamese UI
 
     def orders(self):
         conn = shop_bot.get_db_connection()
@@ -59,7 +60,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
     # ---------- catalogue / menu ----------
     def test_main_menu_lists_both_products_and_keeps_old_plus_button(self):
         with self.stock(plus=10, pro=3):
-            keyboard = shop_bot.main_menu_keyboard(1)
+            keyboard = shop_bot.shop_keyboard(1)
         flat = buttons(keyboard)
         plus = [b for b in flat if b.callback_data == "buy_gemini_plus"]
         pro = [b for b in flat if b.callback_data == f"buy_{PRO}"]
@@ -71,7 +72,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
 
     def test_out_of_stock_product_is_still_listed_but_cannot_be_bought(self):
         with self.stock(plus=10, pro=0):
-            flat = buttons(shop_bot.main_menu_keyboard(1))
+            flat = buttons(shop_bot.shop_keyboard(1))
         sold_out = [b for b in flat if b.callback_data == f"soldout_{PRO}"]
         self.assertEqual(len(sold_out), 1)
         self.assertIn("HẾT HÀNG", sold_out[0].text)
@@ -83,7 +84,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         conn.commit()
         conn.close()
         with self.stock():
-            flat = buttons(shop_bot.main_menu_keyboard(1))
+            flat = buttons(shop_bot.shop_keyboard(1))
         self.assertFalse([b for b in flat if PRO in (b.callback_data or "")])
 
     async def test_sold_out_detail_screen_has_no_purchase_buttons(self):
@@ -94,7 +95,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HẾT HÀNG", text)
         datas = [b.callback_data for b in buttons(render.await_args.kwargs["reply_markup"])]
         # the product intro stays visible (with its own guide), but nothing can be bought
-        self.assertEqual(datas, [f"gd:{PRO}", "main_menu"])
+        self.assertEqual(datas, [f"gd:{PRO}", "shop"])
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", text)
 
     async def test_sold_out_button_only_alerts(self):
@@ -112,7 +113,7 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", render.await_args.args[1])
         self.assertIn("Gmail|password", render.await_args.args[1])
         datas = [b.callback_data for b in buttons(render.await_args.kwargs["reply_markup"])]
-        self.assertEqual(datas, [f"sq:{PRO}:1", f"gd:{PRO}", "main_menu"])
+        self.assertEqual(datas, [f"sq:{PRO}:1", f"gd:{PRO}", "shop"])
 
     def test_callback_data_fits_telegram_limit_and_old_plus_format_is_unchanged(self):
         self.assertEqual(shop_bot.cb_qty("select", PLUS, 4), "select_qty_4")

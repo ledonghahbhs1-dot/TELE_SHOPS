@@ -186,3 +186,10 @@ HTTP logs. HTTPX request logging was disabled in commit `fc7070e`, but the exist
 token should be revoked/rotated with BotFather. Update Railway `BOT_TOKEN` and
 Vercel `TG_SALES_BOT_TOKEN` together, redeploy both, and confirm authenticated stock
 access. Never paste the token into chat or commit it.
+
+## i18n (vi/en) + menu "Mua hàng" + ChatGPT Go (task 046)
+- All customer-facing text lives in `i18n.py` (`t(lang, key, **kw)`; missing -> English + warning). Admin-only text stays Vietnamese.
+- Language per user: table `user_lang` (idempotent `CREATE IF NOT EXISTS`). New users default to `en` (setting `default_lang`); users with order history and no saved choice resolve to `vi`.
+- Product pages come from `product_content.json` (vi/en, editable without code). Prices/stock stay on the web. ChatGPT Go USD = VND / `i18n.BOT_VND_PER_USD` (25000).
+- Main menu = Mua hàng / Đơn hàng / CSKH / Ngôn ngữ; products are in `shop_keyboard()` (callbacks `buy_<sku>`, `soldout_<sku>` unchanged).
+- Stock-in notification: `stock_notify.py` + `shop_bot.stock_watch_task` (polls every 60 s, merges to 1 msg/product/5 min, per-language groups, "Mua ngay" button).

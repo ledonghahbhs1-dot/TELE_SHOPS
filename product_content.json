@@ -1,0 +1,145 @@
+{
+  "_readme": "File NỘI DUNG SẢN PHẨM (vi/en) – sửa file này, KHÔNG cần sửa code. Khóa = SKU. Giá/tồn kho luôn lấy từ web/DB; price_vnd_fallback chỉ dùng khi SKU chưa có trong danh mục web. Trường 'needs_owner_approval' = true nghĩa là nội dung là BẢN NHÁP chờ Goof duyệt.",
+  "_exchange": "Giá USD hiển thị = giá VNĐ / BOT_VND_PER_USD (25.000) – hằng số trong i18n.py.",
+  "gemini_plus": {
+    "needs_owner_approval": false,
+    "source": "Nội dung có sẵn trong product_intros.py (gemini_plus_intro), chuyển sang dữ liệu.",
+    "name": {
+      "vi": "Google AI Plus 400GB (12 Tháng)",
+      "en": "Google AI Plus 400GB (12 Months)"
+    },
+    "short_name": {
+      "vi": "GOOGLE AI PLUS 12 THÁNG",
+      "en": "GOOGLE AI PLUS 12 MONTHS"
+    },
+    "duration": {
+      "vi": "12 Tháng (1 Năm trọn vẹn)",
+      "en": "12 months (a full year)"
+    },
+    "features": {
+      "vi": [
+        "Gemini 3.6 Flash, Deep Research, hạn mức x2",
+        "Trợ lý Gemini hỗ trợ hiệu đính trong Gmail",
+        "Mở rộng tạo ảnh, nhạc, video & Gemini Notebook",
+        "Bộ nhớ 400 GB dùng chung Gmail, Google Drive, Google Photos",
+        "Chia sẻ tối đa 5 thành viên gia đình"
+      ],
+      "en": [
+        "Gemini 3.6 Flash, Deep Research, 2x usage limits",
+        "Gemini assistant helps you proofread inside Gmail",
+        "Expanded image, music and video creation & Gemini Notebook",
+        "400 GB storage shared across Gmail, Google Drive, Google Photos",
+        "Share with up to 5 family members"
+      ]
+    },
+    "delivery": {
+      "vi": "Bot gửi link kích hoạt ngay sau khi thanh toán được xác nhận.",
+      "en": "The bot sends your activation link right after payment is confirmed."
+    },
+    "warranty": {
+      "vi": "Bảo hành 24h (1 đổi 1 siêu tốc)",
+      "en": "24h warranty (fast 1-for-1 replacement)"
+    },
+    "notes": {
+      "vi": [
+        "Giá gốc Google: 132.000 ₫/tháng (1.584.000 ₫ / 12 tháng)."
+      ],
+      "en": [
+        "Google's list price: 132,000 VND/month (1,584,000 VND / 12 months)."
+      ]
+    }
+  },
+  "gemini_pro_account": {
+    "needs_owner_approval": true,
+    "source": "Mô tả có sẵn trong shop_bot.py (seed products) + product_guides.py; chính sách bảo hành CHƯA có – chủ shop cần xác nhận.",
+    "name": {
+      "vi": "ACCOUNT GEMINI PRO FULL BENEFITS",
+      "en": "GEMINI PRO ACCOUNT – FULL BENEFITS"
+    },
+    "short_name": {
+      "vi": "ACCOUNT GEMINI PRO FULL BENEFITS",
+      "en": "GEMINI PRO ACCOUNT FULL BENEFITS"
+    },
+    "duration": null,
+    "features": {
+      "vi": [
+        "Google AI Pro với Gemini 4 Argon",
+        "Quyền truy cập mở rộng Gemini 3.1 Pro và Deep Research",
+        "Tạo ảnh, nhạc, video; Gemini Notebook",
+        "Google AI Studio, Antigravity, Colab",
+        "Bộ nhớ dùng chung 5 TB"
+      ],
+      "en": [
+        "Google AI Pro with Gemini 4 Argon",
+        "Extended access to Gemini 3.1 Pro and Deep Research",
+        "Image, music and video creation; Gemini Notebook",
+        "Google AI Studio, Antigravity, Colab",
+        "5 TB shared storage"
+      ]
+    },
+    "delivery": {
+      "vi": "Tài khoản dạng Gmail|password gửi trong tin nhắn riêng sau khi thanh toán được xác nhận.",
+      "en": "A Gmail|password account is sent in a private message once payment is confirmed."
+    },
+    "warranty": null,
+    "notes": {
+      "vi": [
+        "Quyền lợi có thể thay đổi theo khu vực và điều khoản của Google.",
+        "Cần hỗ trợ: liên hệ CSKH kèm mã đơn hàng."
+      ],
+      "en": [
+        "Benefits may vary by region and Google's terms.",
+        "Need help? Contact support with your order ID."
+      ]
+    },
+    "owner_todo": "Chính sách bảo hành chưa có nên không hiển thị; Goof điền vào 'warranty' khi xác nhận."
+  },
+  "chatgpt_go_3m": {
+    "needs_owner_approval": false,
+    "price_vnd_fallback": 100000,
+    "source": "Thông tin do Goof cung cấp (task 046 follow-up): giao bằng offer link; 4 lợi ích như bên dưới. Chưa có chính sách bảo hành.",
+    "name": {
+      "vi": "CHATGPT GO 3 THÁNG",
+      "en": "ChatGPT Go – 3 Months"
+    },
+    "short_name": {
+      "vi": "CHATGPT GO 3 THÁNG",
+      "en": "CHATGPT GO 3 MONTHS"
+    },
+    "duration": {
+      "vi": "3 Tháng",
+      "en": "3 months"
+    },
+    "features": {
+      "vi": [
+        "Quyền truy cập nhiều hơn vào các công cụ thiết yếu",
+        "Thêm quyền truy cập vào GPT-5: dùng nhiều tin nhắn tự động GPT-5 hơn để viết, học và giải quyết các vấn đề hằng ngày",
+        "Giới hạn sử dụng cao hơn: tải lên nhiều tệp hơn, làm việc với tài liệu lớn hơn và tạo nhiều hình ảnh hơn",
+        "Bộ nhớ và ngữ cảnh dài hơn: cửa sổ ngữ cảnh dài hơn giúp ChatGPT ghi nhớ các điểm chính và tiếp tục công việc ngay từ nơi đã dừng"
+      ],
+      "en": [
+        "More access to essential tools",
+        "More access to GPT-5: use more automatic GPT-5 messages to write, learn and solve everyday problems",
+        "Higher usage limits: upload more files, work with larger documents and create more images",
+        "Longer memory and context: a longer context window helps ChatGPT remember key points and pick up your work right where you left off"
+      ]
+    },
+    "delivery": {
+      "vi": "Mỗi đơn nhận 1 offer link (link ưu đãi) từ kho, bot gửi tự động sau khi thanh toán được xác nhận. Mở link, đăng nhập tài khoản ChatGPT của bạn và làm theo màn hình kích hoạt. Link chỉ dùng được một lần.",
+      "en": "Each order gets 1 offer link from stock, sent automatically by the bot once payment is confirmed. Open the link, sign in to your ChatGPT account and follow the activation screen. The link works only once."
+    },
+    "warranty": null,
+    "notes": {
+      "vi": [
+        "Liên hệ CSKH nếu link lỗi (kèm mã đơn hàng)."
+      ],
+      "en": [
+        "Contact support if the link fails (include your order ID)."
+      ]
+    },
+    "owner_todo": "Goof chưa cung cấp chính sách bảo hành: trang chỉ ghi 'Liên hệ CSKH nếu link lỗi'. Điền 'warranty' khi có.",
+    "usd_from_rate": true,
+    "delivery_kind": "offer_link"
+  },
+  "_usd_from_rate": "usd_from_rate=true: nếu web chưa có giá USDT của SKU, bot hiển thị giá USD = giá VNĐ / 25.000 (không tự đặt giá USDT khi thanh toán – hóa đơn Plisio do web tính)."
+}

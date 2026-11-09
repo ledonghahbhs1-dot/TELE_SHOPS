@@ -17,8 +17,12 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import i18n
+import product_content
 import product_guides
 import product_intros
+import stock_notify
+from i18n import t
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -298,6 +302,15 @@ def init_database():
     )
     """)
 
+    # 5. Ngôn ngữ giao diện theo từng khách (vi/en). Idempotent: chỉ CREATE IF NOT EXISTS, không đụng dữ liệu cũ.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_lang (
+        user_id INTEGER PRIMARY KEY,
+        lang TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     # Khởi tạo sản phẩm Gemini Plus mặc định nếu chưa có
     cursor.execute("SELECT id FROM products WHERE id = 'gemini_plus'")
     if not cursor.fetchone():
@@ -404,8 +417,14 @@ def usdt_setting_key(sku: str) -> str:
 
 
 def get_usdt_price(sku: str = DEFAULT_SKU) -> float:
+    raw = get_setting(usdt_setting_key(sku), "")
+    if raw == "":
+        if sku != DEFAULT_SKU and product_content.usd_from_rate(sku):
+            # Web chưa có giá USDT riêng: hiển thị theo tỉ giá cố định của bot (25.000 VNĐ = 1 USD).
+            return i18n.usd_from_vnd(sku_price_vnd(sku))
+        raw = "1"
     try:
-        return float(get_setting(usdt_setting_key(sku), "1"))
+        return float(raw)
     except (TypeError, ValueError):
         return 1.0
 
@@ -581,8 +600,13 @@ def deliver_product(order_id, user_id):
     cursor.execute("""
     UPDATE orders 
     SET status = 'completed', item_delivered = ?, completed_at = ? 
-    WHERE order_id = ?
+    WHERE order_id = ? AND status != 'completed'
     """, (all_links_text, now, order_id))
+    if cursor.rowcount == 0:
+        # Another worker completed this order first: return exactly what it stored (never a second link).
+        row = cursor.execute("SELECT item_delivered FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+        conn.close()
+        return (row["item_delivered"] or "").splitlines() or None
 
     conn.commit()
     conn.close()
@@ -928,70 +952,149 @@ async def sync_order_to_web_async(order_id: str, tg_user_id: int, tg_username: s
     except Exception as e:
         logger.warning(f"Lỗi chạy sync_order_to_web_async: {e}")
 
+# ==================== NGÔN NGỮ & HIỂN THỊ SẢN PHẨM ====================
+def get_default_lang() -> str:
+    """Ngôn ngữ mặc định cho khách mới: 'en' (khớp web); chủ shop đổi được bằng setting `default_lang`."""
+    return i18n.normalize_lang(get_setting("default_lang", i18n.DEFAULT_LANG))
+
+
+def get_user_lang(user_id) -> str:
+    """Ngôn ngữ đã lưu của khách. Chưa lưu: khách ĐÃ có đơn hàng -> 'vi' (giữ trải nghiệm cũ), khách mới -> mặc định ('en')."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return get_default_lang()
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT lang FROM user_lang WHERE user_id = ?", (uid,)).fetchone()
+        if row:
+            return i18n.normalize_lang(row["lang"])
+        has_history = conn.execute("SELECT 1 FROM orders WHERE user_id = ? LIMIT 1", (uid,)).fetchone()
+    finally:
+        conn.close()
+    return i18n.LEGACY_LANG if has_history else get_default_lang()
+
+
+def set_user_lang(user_id, lang) -> str:
+    code = i18n.normalize_lang(lang)
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO user_lang (user_id, lang, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(user_id) DO UPDATE SET lang = excluded.lang, updated_at = CURRENT_TIMESTAMP",
+            (int(user_id), code),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return code
+
+
+def listed_skus() -> list[str]:
+    """SKU hiện trong mục Mua hàng: danh mục web + SKU có trong product_content.json mà web chưa trả về (luôn hiện, ghi Hết hàng)."""
+    skus = list(known_skus())
+    for sku in product_content.listed_skus():
+        if sku not in skus:
+            skus.append(sku)
+    return skus
+
+
+def sku_price_vnd(sku: str) -> int:
+    row = get_product(sku)
+    price = int(row["price"] or 0) if row else 0
+    return price if price > 0 else product_content.price_fallback(sku)
+
+
+def sku_title(sku: str, lang) -> str:
+    """Tên hiển thị đầy đủ theo ngôn ngữ (từ product_content.json; chưa có thì tên từ web/DB)."""
+    return product_content.name(sku, lang, "") or sku_display_name(sku)
+
+
+def sku_is_in_stock(sku: str) -> bool:
+    """Còn hàng để mua: phải là SKU web đang bán VÀ còn tồn kho."""
+    return sku in known_skus() and sku_in_stock_hint(sku)
+
+
 # Trạng thái chờ người dùng nhập số lượng tuỳ chỉnh: user_id -> sku
 AWAITING_QTY_USERS: dict[int, str] = {}
 DELIVERY_LOCK = asyncio.Lock()
 
-def format_delivered_links_message(order_id: str, delivered_links: list[str], sku: str = DEFAULT_SKU) -> tuple[str, list]:
-    """Định dạng tin nhắn và nút mở link sau khi thanh toán thành công"""
+def format_delivered_links_message(order_id: str, delivered_links: list[str], sku: str = DEFAULT_SKU, lang: str = "vi") -> tuple[str, list]:
+    """Định dạng tin nhắn và nút mở link sau khi thanh toán thành công (theo ngôn ngữ của khách)."""
+    oid = html.escape(order_id)
+    my_orders_btn = vip_btn(t(lang, "btn_my_orders"), callback_data="my_orders", emoji_name="box")
+    back_btn = vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")
+    head = (
+        f"{vip_em('party', '🎉')} {t(lang, 'deliv_success', order_id=oid)}\n\n"
+        f"{vip_em('check', '✅')} {t(lang, 'deliv_confirmed')}\n"
+    )
+    if product_content.field(sku, "delivery_kind", lang) == "offer_link":
+        # Offer link (1 link/đơn): hiển thị link + nút mở + hướng dẫn; chỉ tạo nút url khi thật sự là http(s).
+        links = [str(x).strip() for x in delivered_links if str(x).strip()]
+        link_lines = "\n".join(f"<code>{html.escape(x)}</code>" for x in links)
+        msg = (
+            head +
+            f"{vip_em('box', '📦')} <b>{t(lang, 'deliv_product')}:</b> {html.escape(sku_title(sku, lang))}\n"
+            f"{vip_em('key', '🔗')} {t(lang, 'offer_title', n=len(links))}\n"
+            f"{link_lines}\n\n"
+            f"{vip_em('diamond', '💎')} {t(lang, 'offer_howto_title')}\n"
+            f"{vip_em('num1', '1️⃣')} {t(lang, 'offer_step1')}\n"
+            f"{vip_em('num2', '2️⃣')} {t(lang, 'offer_step2')}\n"
+            f"{vip_em('num3', '3️⃣')} {t(lang, 'offer_step3')}\n\n"
+            f"{vip_em('shield', '⚠️')} {t(lang, 'offer_single_use')}"
+        )
+        buttons = [[vip_btn(t(lang, "btn_open_offer"), url=x, emoji_name="crown", style="primary")]
+                   for x in links if x.lower().startswith(("https://", "http://"))]
+        return msg, buttons + [[my_orders_btn], [back_btn]]
+
     if sku != DEFAULT_SKU:
         # Tài khoản/nội dung không phải URL: không tạo nút url (Telegram sẽ từ chối), chỉ hiển thị dạng code.
         items_text = "\n".join(f"<code>{html.escape(item)}</code>" for item in delivered_links)
         msg = (
-            f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{html.escape(order_id)}</code>!</b>\n\n"
-            f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
-            f"{vip_em('box', '📦')} <b>Sản phẩm:</b> {html.escape(sku_display_name(sku))}\n"
-            f"{vip_em('key', '🔗')} <b>Thông tin nhận hàng ({len(delivered_links)}):</b>\n{items_text}\n\n"
-            f"{vip_em('crown', '👑')} Cảm ơn Quý Khách đã tin tưởng dịch vụ VIP của WolfMod! Cần hỗ trợ vui lòng liên hệ @wolfmodyt."
+            head +
+            f"{vip_em('box', '📦')} <b>{t(lang, 'deliv_product')}:</b> {html.escape(sku_title(sku, lang))}\n"
+            f"{vip_em('key', '🔗')} <b>{t(lang, 'deliv_items', n=len(delivered_links))}:</b>\n{items_text}\n\n"
+            f"{vip_em('crown', '👑')} {t(lang, 'deliv_thanks_support')}"
         )
-        buttons = [
-            [vip_btn("📦 Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="box")],
-            [vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
-        ]
-        return msg, buttons
+        return msg, [[my_orders_btn], [back_btn]]
 
+    howto = (
+        f"{vip_em('diamond', '💎')} {t(lang, 'deliv_howto_title')}\n"
+        f"{vip_em('num1', '1️⃣')} {t(lang, 'deliv_step1_single' if len(delivered_links) == 1 else 'deliv_step1_multi')}\n"
+        f"{vip_em('num2', '2️⃣')} {t(lang, 'deliv_step2')}\n"
+        f"{vip_em('num3', '3️⃣')} {t(lang, 'deliv_step3')}\n\n"
+        f"{vip_em('crown', '👑')} {t(lang, 'deliv_thanks')}"
+    )
     if len(delivered_links) == 1:
         single_link = delivered_links[0]
         msg = (
-            f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{order_id}</code>!</b>\n\n"
-            f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
-            f"{vip_em('key', '🔗')} <b>Link nhận Google AI Plus 400GB (12 Tháng - BH 24h):</b>\n<code>{html.escape(single_link)}</code>\n\n"
-            f"{vip_em('diamond', '💎')} <b>Hướng dẫn kích hoạt 3 bước:</b>\n"
-            f"{vip_em('num1', '1️⃣')} Mở link trên trình duyệt có Gmail cá nhân của bạn.\n"
-            f"{vip_em('num2', '2️⃣')} Bấm 'Bắt đầu dùng thử' hoặc 'Nhận ưu đãi' 2TB.\n"
-            f"{vip_em('num3', '3️⃣')} Hoàn tất xác nhận trên Google One.\n\n"
-            f"{vip_em('crown', '👑')} Cảm ơn Quý Khách đã tin tưởng dịch vụ VIP của WolfMod!"
+            head +
+            f"{vip_em('key', '🔗')} {t(lang, 'deliv_plus_single_title')}\n<code>{html.escape(single_link)}</code>\n\n" +
+            howto
         )
         buttons = [
-            [vip_btn("👑 Mở Link Kích Hoạt VIP 👑", url=single_link, emoji_name="crown", style="primary")],
-            [vip_btn("📦 Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="box")],
-            [vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
+            [vip_btn(t(lang, "btn_open_link"), url=single_link, emoji_name="crown", style="primary")],
+            [my_orders_btn],
+            [back_btn],
         ]
         return msg, buttons
 
-    else:
-        qty = len(delivered_links)
-        links_text = ""
-        buttons = []
-        for idx, lk in enumerate(delivered_links, 1):
-            links_text += f"{vip_em('star', '✦')} <b>Link #{idx}:</b> <code>{html.escape(lk)}</code>\n"
-            buttons.append([vip_btn(f"👑 Mở Link #{idx} 👑", url=lk, emoji_name="crown", style="primary")])
-
-        msg = (
-            f"{vip_em('party', '🎉')} <b>THANH TOÁN THÀNH CÔNG ĐƠN HÀNG <code>{order_id}</code>!</b>\n\n"
-            f"{vip_em('check', '✅')} Hệ thống đã xác nhận thanh toán của bạn.\n"
-            f"{vip_em('box', '📦')} <b>Số lượng:</b> <code>{qty} link</code> Google AI Plus 400GB (12 Tháng - BH 24h)\n\n"
-            f"{vip_em('key', '🔗')} <b>DANH SÁCH {qty} LINK KÍCH HOẠT:</b>\n"
-            f"{links_text}\n"
-            f"{vip_em('diamond', '💎')} <b>Hướng dẫn kích hoạt 3 bước:</b>\n"
-            f"{vip_em('num1', '1️⃣')} Mở từng link trên trình duyệt có Gmail tương ứng.\n"
-            f"{vip_em('num2', '2️⃣')} Bấm 'Bắt đầu dùng thử' hoặc 'Nhận ưu đãi' 2TB.\n"
-            f"{vip_em('num3', '3️⃣')} Hoàn tất xác nhận trên Google One.\n\n"
-            f"{vip_em('crown', '👑')} Cảm ơn Quý Khách đã tin tưởng dịch vụ VIP của WolfMod!"
-        )
-        buttons.append([vip_btn("📦 Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="box")])
-        buttons.append([vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
-        return msg, buttons
+    qty = len(delivered_links)
+    links_text = ""
+    buttons = []
+    for idx, lk in enumerate(delivered_links, 1):
+        links_text += f"{vip_em('star', '✦')} <b>{t(lang, 'deliv_link_n', idx=idx)}:</b> <code>{html.escape(lk)}</code>\n"
+        buttons.append([vip_btn(t(lang, "btn_open_link_n", idx=idx), url=lk, emoji_name="crown", style="primary")])
+    msg = (
+        head +
+        f"{vip_em('box', '📦')} {t(lang, 'deliv_plus_multi_qty', qty=qty)}\n\n"
+        f"{vip_em('key', '🔗')} {t(lang, 'deliv_list_title', qty=qty)}\n"
+        f"{links_text}\n" +
+        howto
+    )
+    buttons.append([my_orders_btn])
+    buttons.append([back_btn])
+    return msg, buttons
 
 
 async def send_paid_order_delivery(bot, order_id, user_id):
@@ -1007,7 +1110,7 @@ async def send_paid_order_delivery(bot, order_id, user_id):
         links = await asyncio.to_thread(deliver_product, order_id, user_id)
         if not links:
             return False
-        body, buttons = format_delivered_links_message(order_id, links, str(row["product_id"]))
+        body, buttons = format_delivered_links_message(order_id, links, str(row["product_id"]), get_user_lang(user_id))
         try:
             await bot.send_message(chat_id=int(user_id), text=body, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
         except Exception as error:
@@ -1022,45 +1125,41 @@ async def send_paid_order_delivery(bot, order_id, user_id):
 
 async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
     """Hiển thị màn hình xác nhận đơn hàng kèm nút thanh toán VietQR và USDT theo số lượng"""
+    lang = get_user_lang(getattr(user, "id", 0))
     await asyncio.to_thread(sync_web_product_price, sku)
     prod = get_product(sku)
-    stock = get_stock_count(sku)
     price_unit = prod["price"]
     total_vnd = price_unit * qty
-    price_unit_fmt = f"{price_unit:,} VNĐ"
-    total_vnd_fmt = f"{total_vnd:,} VNĐ"
+    price_unit_fmt = i18n.fmt_vnd(price_unit)
+    total_vnd_fmt = i18n.fmt_vnd(total_vnd)
 
     usdt_unit = get_usdt_price(sku)
     total_usdt = round(usdt_unit * qty, 2)
     total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
+    or_word = t(lang, "or_usdt")
 
-    if sku == DEFAULT_SKU:
-        text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>XÁC NHẬN ĐƠN HÀNG VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🌟')} <b>Gói Đang Chọn:</b> <code>Google AI Plus 400GB (12 Tháng)</code>\n"
-            f"{vip_em('box', '📦')} <b>Số lượng đặt mua:</b> <b>{qty} link</b>\n"
-            f"{vip_em('chart', '🏷')} <b>Đơn giá ưu đãi:</b> <code>{price_unit_fmt}</code> / link (hoặc <code>{usdt_unit} USDT</code>)\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('money', '💰')} <b>TỔNG TIỀN THANH TOÁN:</b> <b>{total_vnd_fmt}</b> (hoặc <b>{total_usdt_str} USDT</b>)\n"
-            f"{vip_em('calendar', '⏳')} <b>Thời hạn sử dụng:</b> 12 Tháng / link (Bảo hành 24h 1 đổi 1)\n\n"
-            f"{vip_em('lightning', '⚡️')} <i>Vui lòng chọn phương thức thanh toán bên dưới để nhận mã QR kích hoạt tự động:</i>"
-        )
-    else:
-        text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>XÁC NHẬN ĐƠN HÀNG VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🌟')} <b>Sản phẩm:</b> <code>{html.escape(str(prod['name']))}</code>\n"
-            f"{vip_em('box', '📦')} <b>Số lượng đặt mua:</b> <b>{qty}</b>\n"
-            f"{vip_em('chart', '🏷')} <b>Đơn giá:</b> <code>{price_unit_fmt}</code> (hoặc <code>{usdt_unit} USDT</code>)\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('money', '💰')} <b>TỔNG TIỀN THANH TOÁN:</b> <b>{total_vnd_fmt}</b> (hoặc <b>{total_usdt_str} USDT</b>)\n\n"
-            f"{vip_em('lightning', '⚡️')} <i>Vui lòng chọn phương thức thanh toán bên dưới. Thông tin nhận hàng được gửi tự động khi thanh toán được xác nhận:</i>"
-        )
+    title = (f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>{t(lang, 'confirm_title')}</b> "
+             f"{vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n")
+    lines = [
+        f"{vip_em('tag', '🌟')} <b>{t(lang, 'confirm_product')}:</b> <code>{html.escape(sku_title(sku, lang))}</code>\n",
+        f"{vip_em('box', '📦')} <b>{t(lang, 'confirm_qty')}:</b> <b>{qty}</b>\n",
+        f"{vip_em('chart', '🏷')} <b>{t(lang, 'confirm_unit')}:</b> <code>{price_unit_fmt}</code> ({or_word} <code>{usdt_unit} USDT</code>)\n",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
+        f"{vip_em('money', '💰')} <b>{t(lang, 'confirm_total')}:</b> <b>{total_vnd_fmt}</b> ({or_word} <b>{total_usdt_str} USDT</b>)\n",
+    ]
+    duration = product_content.field(sku, "duration", lang)
+    if duration:
+        lines.append(f"{vip_em('calendar', '⏳')} <b>{t(lang, 'confirm_duration')}:</b> {html.escape(str(duration))}\n")
+    warranty = product_content.field(sku, "warranty", lang)
+    if warranty:
+        lines.append(f"{vip_em('shield', '🛡')} <b>{t(lang, 'lbl_warranty')}:</b> {html.escape(str(warranty))}\n")
+    text = title + "".join(lines) + f"\n{vip_em('lightning', '⚡️')} {t(lang, 'confirm_choose_method')}"
 
     keyboard = [
-        [vip_btn(f" Thanh Toán VietQR ({total_vnd_fmt})", callback_data=cb_qty("vietqr", sku, qty), emoji_name="card", style="primary")],
-        [vip_btn(f" Thanh Toán USDT ({total_usdt_str} USDT)", callback_data=cb_qty("usdt", sku, qty), emoji_name="usdt", style="success")],
-        [vip_btn("🔄 Chọn Lại Số Lượng", callback_data=cb_buy(sku), emoji_name="refresh")],
-        [vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
+        [vip_btn(t(lang, "btn_pay_vietqr", total=total_vnd_fmt), callback_data=cb_qty("vietqr", sku, qty), emoji_name="card", style="primary")],
+        [vip_btn(t(lang, "btn_pay_usdt", total=total_usdt_str), callback_data=cb_qty("usdt", sku, qty), emoji_name="usdt", style="success")],
+        [vip_btn(t(lang, "btn_reselect_qty"), callback_data=cb_buy(sku), emoji_name="refresh")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1150,7 +1249,7 @@ async def safe_edit_or_reply(query, text, reply_markup=None, parse_mode="HTML", 
 ORDERS_PAGE_SIZE = 5
 ORDER_CONTENT_PREVIEW = 600  # Telegram giới hạn 4096 ký tự/tin nhắn; đơn nhiều link được rút gọn khi liệt kê
 _VIEW_CB_RE = re.compile(r"(gd:([A-Za-z0-9][A-Za-z0-9_]{1,39})|ordp:(\d{1,4}))")
-NO_GUIDE_TEXT = "Sản phẩm này chưa có hướng dẫn riêng. Nếu cần hỗ trợ, vui lòng liên hệ CSKH kèm mã đơn hàng."
+NO_GUIDE_TEXT = i18n.STRINGS["guide_none"]["vi"]  # giữ tên cũ; bản đúng ngôn ngữ: t(lang, "guide_none")
 
 
 def parse_view_callback(data: str):
@@ -1167,9 +1266,9 @@ def has_own_guide(sku: str) -> bool:
     return product_guides.has_guide(sku)
 
 
-def render_guide(sku: str):
-    """Hướng dẫn RIÊNG của sản phẩm, hoặc None nếu sản phẩm chưa có (không bao giờ mượn nội dung SKU khác)."""
-    guide = product_guides.get_guide(sku)
+def render_guide(sku: str, lang: str = "vi"):
+    """Hướng dẫn RIÊNG của sản phẩm theo ngôn ngữ, hoặc None nếu sản phẩm chưa có (không bao giờ mượn nội dung SKU khác)."""
+    guide = product_guides.get_guide(sku, lang)
     if guide is None:
         return None
     lines = [
@@ -1179,16 +1278,17 @@ def render_guide(sku: str):
     ]
     for number, step in enumerate(guide["steps"], 1):
         marker = vip_em(f"num{number}", f"{number}️⃣") if number <= 3 else f"{number}."
-        lines.append(f"{marker} <b>Bước {number}:</b> {step}\n\n")
+        lines.append(f"{marker} <b>{t(lang, 'guide_step', n=number)}:</b> {step}\n\n")
     lines.append(f"{vip_em('star', '💡')} <b>{guide['notes_title']}</b>\n")
     for emoji_name, fallback, text in guide["notes"]:
         lines.append(f"{vip_em(emoji_name, fallback)} {text}\n")
-    lines.append(f"\n{vip_em('shield', '🛡')} <i>Đội ngũ kỹ thuật WolfMod luôn sẵn sàng đồng hành hỗ trợ Quý Khách 24/7!</i>")
+    lines.append(f"\n{vip_em('shield', '🛡')} {t(lang, 'guide_footer')}")
     return "".join(lines)
 
 
-def render_orders_page(user_id: int, page: int):
+def render_orders_page(user_id: int, page: int, lang: str | None = None):
     """(text, keyboard) — đơn đã giao của CHÍNH khách này, mỗi đơn ghi đúng tên sản phẩm theo SKU của đơn."""
+    lang = lang or get_user_lang(user_id)
     conn = get_db_connection()
     try:
         total = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'completed'", (user_id,)).fetchone()["n"]
@@ -1201,55 +1301,56 @@ def render_orders_page(user_id: int, page: int):
         ).fetchall()
     finally:
         conn.close()
-    text = f"{vip_em('diamond')} ═══════ {vip_em('crown')} <b>ĐƠN HÀNG VIP ĐÃ MUA</b> {vip_em('crown')} ═══════ {vip_em('diamond')}\n\n"
+    text = f"{vip_em('diamond')} ═══════ {vip_em('crown')} <b>{t(lang, 'orders_title')}</b> {vip_em('crown')} ═══════ {vip_em('diamond')}\n\n"
     keyboard = []
     if not rows:
-        text += f"{vip_em('box')} <b>Bạn chưa có đơn hàng nào đã giao.</b>"
+        text += f"{vip_em('box')} {t(lang, 'orders_empty')}"
     seen_guides: list[str] = []
     # Telegram: tối đa 4096 ký tự sau khi bỏ thẻ HTML. Chia đều ngân sách cho phần nội dung của các đơn trên trang.
     def _display_name(row) -> str:
-        return 'Google AI Plus 400GB (12 Tháng)' if str(row["product_id"]) == DEFAULT_SKU else sku_display_name(str(row["product_id"]))
+        return sku_title(str(row["product_id"]), lang)
     fixed_chars = sum(len(_display_name(row)) + len(str(row["order_id"])) + 200 for row in rows)
     preview_limit = max(60, min(ORDER_CONTENT_PREVIEW, (3600 - fixed_chars) // max(1, len(rows))))
     for row in rows:
         sku = str(row["product_id"])
         name = _display_name(row)
-        label = "Link kích hoạt" if sku == DEFAULT_SKU else "Thông tin nhận hàng"
+        label = t(lang, "orders_label_link" if sku == DEFAULT_SKU else "orders_label_info")
         content_lines = str(row["item_delivered"] or "").splitlines()
         content = "\n".join(content_lines)
         if len(content) > preview_limit:
             content = content[:preview_limit].rsplit("\n", 1)[0]
-            content += f"\n… (rút gọn, {len(content_lines)} dòng trong đơn)"
+            content += "\n" + t(lang, "orders_truncated", n=len(content_lines))
         text += (
-            f"{vip_em('tag')} <b>Đơn hàng:</b> <code>{html.escape(str(row['order_id']))}</code>\n"
-            f"{vip_em('box')} <b>Sản phẩm:</b> {html.escape(name)}\n"
-            f"{vip_em('calendar')} <b>Thời gian:</b> <code>{html.escape(str(row['completed_at'] or row['created_at'] or ''))}</code>\n"
-            f"{vip_em('check')} <b>Trạng thái:</b> Đã giao\n"
+            f"{vip_em('tag')} <b>{t(lang, 'orders_order')}:</b> <code>{html.escape(str(row['order_id']))}</code>\n"
+            f"{vip_em('box')} <b>{t(lang, 'orders_product')}:</b> {html.escape(name)}\n"
+            f"{vip_em('calendar')} <b>{t(lang, 'orders_time')}:</b> <code>{html.escape(str(row['completed_at'] or row['created_at'] or ''))}</code>\n"
+            f"{vip_em('check')} <b>{t(lang, 'orders_status')}:</b> {t(lang, 'orders_status_delivered')}\n"
             f"{vip_em('key')} <b>{label}:</b>\n<code>{html.escape(content)}</code>\n"
             "──────────────────────────\n"
         )
         if has_own_guide(sku) and sku not in seen_guides:
             seen_guides.append(sku)
-            keyboard.append([vip_btn(f"Hướng dẫn: {name}"[:48], callback_data=f"gd:{sku}", emoji_name="book")])
+            keyboard.append([vip_btn(t(lang, "btn_guide_for", name=name)[:48], callback_data=f"gd:{sku}", emoji_name="book")])
     if pages > 1:
-        text += f"\n<i>Trang {page}/{pages} • {total} đơn</i>"
+        text += "\n" + t(lang, "orders_page", page=page, pages=pages, total=total)
         nav = []
         if page > 1:
-            nav.append(vip_btn("◀ Trang trước", callback_data=f"ordp:{page - 1}", emoji_name="back"))
+            nav.append(vip_btn("◀ " + t(lang, "btn_prev_page"), callback_data=f"ordp:{page - 1}", emoji_name="back"))
         if page < pages:
-            nav.append(vip_btn("Trang sau ▶", callback_data=f"ordp:{page + 1}", emoji_name="refresh"))
+            nav.append(vip_btn(t(lang, "btn_next_page") + " ▶", callback_data=f"ordp:{page + 1}", emoji_name="refresh"))
         keyboard.append(nav)
-    keyboard.append([vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
+    keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
     return text, InlineKeyboardMarkup(keyboard)
 
 
-def welcome_message(user) -> str:
-    """Màn chính NGẮN: chỉ lời chào thương hiệu. Danh sách sản phẩm là các nút; giới thiệu dài nằm ở màn từng sản phẩm."""
-    safe_name = html.escape(user.first_name) if user and getattr(user, "first_name", None) else "Quý Khách"
+def welcome_message(user, lang: str | None = None) -> str:
+    """Màn chính NGẮN: chỉ lời chào thương hiệu. Danh sách sản phẩm nằm trong mục Mua hàng; chi tiết ở màn từng sản phẩm."""
+    lang = lang or get_user_lang(getattr(user, "id", None))
+    safe_name = html.escape(user.first_name) if user and getattr(user, "first_name", None) else t(lang, "guest_name")
     return (
         f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>WOLFMOD VIP STORE</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-        f"{vip_em('sparkle', '✨')} <i>Kính chào Quý Khách VIP</i> <b>{safe_name}</b> <i>đến với hệ thống dịch vụ số cao cấp!</i>\n\n"
-        f"{vip_em('star', '👇')} <i>Chọn sản phẩm bên dưới để xem chi tiết:</i>"
+        f"{vip_em('sparkle', '✨')} {t(lang, 'welcome_greet', name=safe_name)}\n\n"
+        f"{vip_em('star', '👇')} {t(lang, 'welcome_hint')}"
     )
 
 
@@ -1258,23 +1359,52 @@ def _plain_len(text: str) -> int:
     return len(html.unescape(re.sub(r"<[^>]+>", "", text)))
 
 
-def render_product_intro(sku: str, stock: int) -> str:
+def render_product_detail(sku: str, lang: str, price: int) -> str:
+    """Trang chi tiết đầy đủ của sản phẩm (vi/en) dựng từ product_content.json + giá thật của web."""
+    L = lambda key, **kw: t(lang, key, **kw)  # noqa: E731
+    lines = [f"{vip_em('crown', '👑')} <b>{html.escape(sku_title(sku, lang))}</b> {vip_em('crown', '👑')}", ""]
+    duration = product_content.field(sku, "duration", lang)
+    if duration:
+        lines.append(f"{vip_em('calendar', '⏳')} <b>{L('lbl_duration')}:</b> {html.escape(str(duration))}")
+    if price > 0:
+        lines.append(f"{vip_em('money', '💰')} <b>{L('lbl_price')}:</b> "
+                     f"<b>{L('price_line', vnd=i18n.fmt_vnd(price), usd=i18n.fmt_usd(price))}</b>")
+    feats = product_content.features(sku, lang)
+    if feats:
+        lines += ["", f"{vip_em('star', '🌟')} <b>{L('lbl_features')}:</b>"] + [f"• {html.escape(item)}" for item in feats]
+    delivery = product_content.field(sku, "delivery", lang)
+    if delivery:
+        lines += ["", f"{vip_em('box', '📦')} <b>{L('lbl_delivery')}:</b> {html.escape(str(delivery))}"]
+    warranty = product_content.field(sku, "warranty", lang)
+    if warranty:
+        lines.append(f"{vip_em('shield', '🛡')} <b>{L('lbl_warranty')}:</b> {html.escape(str(warranty))}")
+    notes = product_content.notes(sku, lang)
+    if notes:
+        lines += ["", f"{vip_em('chat', '💬')} <b>{L('lbl_notes')}:</b>"] + [f"• {html.escape(item)}" for item in notes]
+    return "\n".join(lines) + "\n\n"
+
+
+def render_product_intro(sku: str, stock: int, lang: str | None = None) -> str:
     """Màn giới thiệu RIÊNG của sản phẩm (giá, mô tả, tồn kho, số lượng tối đa); hết hàng thì ghi rõ và không mời mua."""
+    lang = i18n.normalize_lang(lang or get_default_lang())
     prod = get_product(sku)
-    price = int(prod["price"] or 0) if prod else 0
+    price = sku_price_vnd(sku)
     usdt_price = get_setting(usdt_setting_key(sku), "1")
-    if product_intros.has_own_intro(sku):
-        text = product_intros.INTROS[sku](vip_em, price, usdt_price)
+    if product_content.get(sku):
+        text = render_product_detail(sku, lang, price)
+    elif product_intros.has_own_intro(sku):
+        text = product_intros.INTROS[sku](vip_em, price, usdt_price, lang)
     else:
-        text = product_intros.generic_intro(vip_em, str(prod["name"]), str(prod["description"] or ""), price, usdt_price)
+        text = product_intros.generic_intro(vip_em, str(prod["name"]) if prod else sku,
+                                            str(prod["description"] or "") if prod else "", price, usdt_price, lang)
     if stock <= 0:
-        return text + f"{vip_em('cross', '❌')} <b>Hiện sản phẩm đang HẾT HÀNG.</b> Vui lòng quay lại sau hoặc liên hệ CSKH VIP."
+        return text + f"{vip_em('cross', '❌')} {t(lang, 'oos_notice')}"
+    stock_line = f"{vip_em('box', '📦')} <b>{t(lang, 'lbl_stock')}:</b> <code>{t(lang, 'stock_available_value', stock=stock)}</code>\n"
     if sku == DEFAULT_SKU:
-        return (text + f"{vip_em('box', '📦')} <b>Tồn kho sẵn sàng:</b> <code>{stock}</code> link kích hoạt chính chủ\n\n"
-                f"{vip_em('lightning', '⚡️')} <i>Vui lòng bấm chọn số lượng link bạn muốn mua bên dưới:</i>")
-    return (text + f"{vip_em('box', '📦')} <b>Tồn kho sẵn sàng:</b> <code>{stock}</code>\n"
-            f"{vip_em('shield', '🛡')} <b>Tối đa mỗi đơn:</b> {sku_max_qty(sku)}\n\n"
-            f"{vip_em('lightning', '⚡️')} <i>Bấm bên dưới để tiếp tục:</i>")
+        return text + stock_line + f"\n{vip_em('lightning', '⚡️')} {t(lang, 'pick_qty')}"
+    return (text + stock_line +
+            f"{vip_em('shield', '🛡')} <b>{t(lang, 'lbl_max_per_order')}:</b> {sku_max_qty(sku)}\n\n"
+            f"{vip_em('lightning', '⚡️')} {t(lang, 'pick_continue')}")
 
 
 async def send_product_screen(query, sku: str, text: str, keyboard) -> None:
@@ -1302,39 +1432,52 @@ async def send_product_screen(query, sku: str, text: str, keyboard) -> None:
     await safe_edit_or_reply(query, text, reply_markup=markup, parse_mode="HTML")
 
 
-def main_menu_keyboard(user_id=None):
-    stock_count = get_stock_count("gemini_plus")
-    price = get_product("gemini_plus")["price"]
+def main_menu_keyboard(user_id=None, lang: str | None = None):
+    """Menu chính gọn: Mua hàng (gom mọi sản phẩm), Đơn hàng, CSKH, Ngôn ngữ."""
+    lang = lang or get_user_lang(user_id)
+    return InlineKeyboardMarkup([
+        [vip_btn(t(lang, "btn_shop"), callback_data="shop", emoji_name="crown", style="primary")],
+        [vip_btn(t(lang, "btn_orders"), callback_data="my_orders", emoji_name="diamond")],
+        [vip_btn(t(lang, "btn_support"), callback_data="support", emoji_name="chat")],
+        [vip_btn(t(lang, "btn_language"), callback_data="lang_menu", emoji_name="globe")],
+    ])
 
-    plus_label = (f"MUA GOOGLE AI PLUS 12 THÁNG • {price:,} VNĐ (Kho: {stock_count})" if stock_count > 0
-                  else f"GOOGLE AI PLUS 12 THÁNG • {price:,} VNĐ • HẾT HÀNG")
-    keyboard = [
-        [
-            vip_btn(plus_label, callback_data="buy_gemini_plus", emoji_name="crown", style="primary")
-        ],
-    ]
-    # Sản phẩm khác: luôn được liệt kê; hết hàng thì nút không cho mua.
-    for sku in known_skus():
-        if sku == DEFAULT_SKU:
-            continue
+
+def shop_message(lang: str) -> str:
+    return (f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} {t(lang, 'shop_title')} {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
+            f"{vip_em('star', '👇')} {t(lang, 'shop_hint')}")
+
+
+def shop_keyboard(user_id=None, lang: str | None = None):
+    """Danh sách sản phẩm (callback_data cũ giữ nguyên: buy_<sku>, soldout_<sku>)."""
+    lang = lang or get_user_lang(user_id)
+    keyboard = []
+    for sku in listed_skus():
+        price = sku_price_vnd(sku)
+        if price <= 0:
+            continue  # chưa đồng bộ được giá từ web: ẩn như trước
         row = get_product(sku)
-        if not row or int(row["price"] or 0) <= 0:
-            continue
-        label = str(row["name"])[:32]
-        if sku_in_stock_hint(sku):
-            keyboard.append([vip_btn(f"MUA {label} • {int(row['price']):,} VNĐ", callback_data=cb_buy(sku), emoji_name="crown", style="primary")])
+        label = (product_content.short_name(sku, lang) or (str(row["name"]) if row else sku))[:40]
+        if sku_is_in_stock(sku):
+            if sku == DEFAULT_SKU:
+                text = t(lang, "btn_product_buy", name=label, price=i18n.fmt_vnd(price), stock=get_stock_count(sku))
+            else:
+                text = t(lang, "btn_product_buy_nostock", name=label, price=i18n.fmt_vnd(price))
+            keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="crown", style="primary")])
         else:
-            keyboard.append([vip_btn(f"{label} • HẾT HÀNG", callback_data=f"soldout_{sku}", emoji_name="cross")])
-    keyboard += [
-        [
-            vip_btn("Đơn Hàng VIP Của Tôi", callback_data="my_orders", emoji_name="diamond")
-        ],
-        [
-            vip_btn("CSKH Trực Tuyến 24/7", callback_data="support", emoji_name="chat")
-        ]
-    ]
-
+            # gemini_plus keeps opening its own page (which says sold out), as before; others show a sold-out alert.
+            cb = cb_buy(sku) if sku == DEFAULT_SKU else f"soldout_{sku}"
+            keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label, price=i18n.fmt_vnd(price)), callback_data=cb, emoji_name="cross")])
+    keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
     return InlineKeyboardMarkup(keyboard)
+
+
+def language_keyboard(lang: str):
+    return InlineKeyboardMarkup([
+        [vip_btn(("✓ " if lang == "vi" else "") + i18n.LANG_NAMES["vi"], callback_data="setlang:vi", emoji_name="globe")],
+        [vip_btn(("✓ " if lang == "en" else "") + i18n.LANG_NAMES["en"], callback_data="setlang:en", emoji_name="globe")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
+    ])
 
 # ==================== HANDLERS ====================
 
@@ -1344,20 +1487,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user:
         AWAITING_QTY_USERS.pop(user.id, None)
-    welcome_text = welcome_message(user)
+    lang = get_user_lang(user.id) if user else get_default_lang()
+    welcome_text = welcome_message(user, lang)
+    markup = main_menu_keyboard(user.id if user else 0, lang)
     if update.message:
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=main_menu_keyboard(user.id if user else 0),
-            parse_mode="HTML"
-        )
+        await update.message.reply_text(welcome_text, reply_markup=markup, parse_mode="HTML")
     elif update.callback_query:
-        await safe_edit_or_reply(
-            update.callback_query,
-            welcome_text,
-            reply_markup=main_menu_keyboard(user.id if user else 0),
-            parse_mode="HTML"
-        )
+        await safe_edit_or_reply(update.callback_query, welcome_text, reply_markup=markup, parse_mode="HTML")
+
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/language: chọn Tiếng Việt / English (lưu theo user_id)."""
+    user = update.effective_user
+    lang = get_user_lang(user.id) if user else get_default_lang()
+    if update.message:
+        await update.message.reply_text(t(lang, "lang_title"), reply_markup=language_keyboard(lang), parse_mode="HTML")
 
 class PlisioMinimumAmountError(Exception):
     def __init__(self, minimum, currency):
@@ -1423,6 +1567,7 @@ async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU)
         if sku != DEFAULT_SKU:
             reference += f":{sku}"
         order_id = "TGS" + hashlib.sha256(reference.encode()).hexdigest()[:12].upper()
+    lang = get_user_lang(user.id)
     try:
         # gemini_plus keeps the original 3-argument call; other products pass their SKU explicitly.
         invoice_args = (order_id, user, qty) if sku == DEFAULT_SKU else (order_id, user, qty, sku)
@@ -1430,11 +1575,10 @@ async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU)
     except PlisioMinimumAmountError as error:
         network = "BEP20 (BSC)" if error.currency == "USDT_BSC" else "TRC20"
         await safe_edit_or_reply(query,
-            f"{vip_em('shield')} <b>Plisio yêu cầu hóa đơn lớn hơn {error.minimum:g} USDT trên mạng {network}.</b>\n\n"
-            f"{vip_em('lightning')} Vui lòng chọn VietQR hoặc tăng số lượng để tổng tiền vượt mức này.",
+            f"{vip_em('shield')} {t(lang, 'plisio_minimum', minimum=format(error.minimum, 'g'), network=network)}",
             reply_markup=InlineKeyboardMarkup([
-                [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=cb_qty("select", sku, qty), emoji_name="refresh", style="primary")],
-                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+                [vip_btn(t(lang, "btn_reselect_method"), callback_data=cb_qty("select", sku, qty), emoji_name="refresh", style="primary")],
+                [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
         return
     except Exception as error:
@@ -1442,11 +1586,10 @@ async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU)
         safe_error = message if re.fullmatch(r"HTTP [0-9]{3}: [a-z0-9_]{1,64}", message) else type(error).__name__
         logger.warning("Plisio invoice unavailable: %s", safe_error)
         await safe_edit_or_reply(query,
-            f"{vip_em('shield')} <b>Chưa thể tạo hóa đơn Plisio.</b>\n"
-            "Vui lòng thử lại hoặc chọn thanh toán VietQR.",
+            f"{vip_em('shield')} {t(lang, 'plisio_unavailable')}",
             reply_markup=InlineKeyboardMarkup([
-                [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
-                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+                [vip_btn(t(lang, "btn_reselect_method"), callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
+                [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
         return
     total = float(invoice["amount_usdt"])
@@ -1464,20 +1607,47 @@ async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU)
     finally:
         conn.close()
     bill = (
-        f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>HÓA ĐƠN THANH TOÁN USDT VIP</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
-        f"{vip_em('tag')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
-        f"{vip_em('box')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-        f"{vip_em('money')} <b>Số tiền thanh toán:</b> <code>{total:g} USDT</code>\n"
-        f"{vip_em('globe')} <b>Cổng thanh toán:</b> Plisio (<code>{'USDT BEP20 (BSC)' if invoice['currency'] == 'USDT_BSC' else html.escape(invoice['currency'])}</code>)\n"
-        f"{vip_em('calendar')} <b>Hạn thanh toán:</b> <code>{expiry:%H:%M:%S}</code>\n\n"
-        f"{vip_em('lightning')} <i>Bấm nút bên dưới để mở hóa đơn và mã QR Plisio. "
-        "Chuyển đúng số tiền và mạng được ghi trên hóa đơn.</i>"
+        f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>{t(lang, 'usdt_bill_title')}</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
+        f"{vip_em('tag')} <b>{t(lang, 'bill_order_id')}:</b> <code>{order_id}</code>\n"
+        f"{vip_em('box')} <b>{t(lang, 'bill_qty')}:</b> <b>{qty}</b>\n"
+        f"{vip_em('money')} <b>{t(lang, 'usdt_amount')}:</b> <code>{total:g} USDT</code>\n"
+        f"{vip_em('globe')} <b>{t(lang, 'usdt_gateway')}:</b> Plisio (<code>{'USDT BEP20 (BSC)' if invoice['currency'] == 'USDT_BSC' else html.escape(invoice['currency'])}</code>)\n"
+        f"{vip_em('calendar')} <b>{t(lang, 'usdt_deadline')}:</b> <code>{expiry:%H:%M:%S}</code>\n\n"
+        f"{vip_em('lightning')} {t(lang, 'usdt_bill_hint')}"
     )
     await safe_edit_or_reply(query, bill, reply_markup=InlineKeyboardMarkup([
-        [vip_btn("Thanh Toán USDT Qua Plisio", url=invoice["invoice_url"], emoji_name="usdt", style="success")],
-        [vip_btn("TÔI ĐÃ THANH TOÁN — KIỂM TRA", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+        [vip_btn(t(lang, "btn_pay_plisio"), url=invoice["invoice_url"], emoji_name="usdt", style="success")],
+        [vip_btn(t(lang, "btn_check_paid"), callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
     ]), parse_mode="HTML")
+
+
+def build_vietqr_bill(lang, order_id, product_name, qty, amount, bank_name, bank_account, bank_owner, expires_display) -> str:
+    return (
+        f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>{t(lang, 'bill_title')}</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
+        f"{vip_em('tag', '🆔')} <b>{t(lang, 'bill_order_id')}:</b> <code>{order_id}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{vip_em('box', '📦')} <b>{t(lang, 'bill_service')}:</b> {html.escape(str(product_name))}\n"
+        f"{vip_em('sparkle', '✨')} <b>{t(lang, 'bill_qty')}:</b> <b>{qty}</b>\n"
+        f"{vip_em('money', '💵')} <b>{t(lang, 'bill_amount')}:</b> <code>{i18n.fmt_vnd(amount)}</code>\n\n"
+        f"{vip_em('bank', '🏦')} <b>{t(lang, 'bill_bank')}:</b> <code>{bank_name}</code> {t(lang, 'bill_bank_suffix')}\n"
+        f"{vip_em('card', '💳')} <b>{t(lang, 'bill_account')}:</b> <code>{bank_account}</code>\n"
+        f"{vip_em('user', '👤')} <b>{t(lang, 'bill_owner')}:</b> <code>{bank_owner}</code>\n"
+        f"{vip_em('memo', '📝')} <b>{t(lang, 'bill_memo')}:</b> <code>{order_id}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{vip_em('calendar', '⏳')} <b>{t(lang, 'bill_deadline')}:</b> {t(lang, 'bill_deadline_value', expires=expires_display)}\n"
+        f"{vip_em('lightning', '⚡️')} {t(lang, 'bill_tip')}\n"
+        f"{vip_em('shield', '⚠️')} {t(lang, 'bill_warning')}"
+    )
+
+
+def build_vietqr_buttons(lang, order_id, total_usdt_str) -> list:
+    return [
+        [vip_btn(t(lang, "btn_paid_done"), callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
+        [vip_btn(t(lang, "btn_switch_usdt", total=total_usdt_str), callback_data=f"switch_pay_usdt_{order_id}", emoji_name="usdt", style="success")],
+        [vip_btn(t(lang, "btn_cancel_tx"), callback_data=f"cancel_order_{order_id}", emoji_name="cross", style="danger")],
+        [vip_btn(t(lang, "btn_back_lobby"), callback_data="main_menu", emoji_name="back")],
+    ]
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1487,6 +1657,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = update.effective_user
     user_id = user.id
+    lang = get_user_lang(user_id)
     await asyncio.to_thread(refresh_catalogue)
     sku_cb = parse_sku_qty_callback(data)
     view_cb = parse_view_callback(data)
@@ -1502,20 +1673,35 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "main_menu":
         await safe_edit_or_reply(
             query,
-            welcome_message(user),
-            reply_markup=main_menu_keyboard(user_id),
+            welcome_message(user, lang),
+            reply_markup=main_menu_keyboard(user_id, lang),
             parse_mode="HTML"
         )
 
-    elif data == "buy_gemini_plus" or (data.startswith("buy_") and data[4:] in known_skus()):
+    elif data == "shop":
+        await safe_edit_or_reply(query, shop_message(lang), reply_markup=shop_keyboard(user_id, lang), parse_mode="HTML")
+
+    elif data == "lang_menu":
+        await safe_edit_or_reply(query, t(lang, "lang_title"), reply_markup=language_keyboard(lang), parse_mode="HTML")
+
+    elif data in ("setlang:vi", "setlang:en"):
+        lang = set_user_lang(user_id, data.split(":", 1)[1])
+        await safe_edit_or_reply(
+            query,
+            welcome_message(user, lang),
+            reply_markup=main_menu_keyboard(user_id, lang),
+            parse_mode="HTML"
+        )
+
+    elif data == "buy_gemini_plus" or (data.startswith("buy_") and data[4:] in listed_skus()):
         sku = DEFAULT_SKU if data == "buy_gemini_plus" else data[4:]
         prod = get_product(sku)
-        stock = get_stock_count(sku)
-        if sku != DEFAULT_SKU and (prod is None or int(prod["price"] or 0) <= 0):
+        stock = get_stock_count(sku) if sku in known_skus() else 0
+        if sku != DEFAULT_SKU and sku_price_vnd(sku) <= 0:
             await safe_edit_or_reply(
                 query,
-                f"{vip_em('cross', '❌')} <b>Sản phẩm tạm thời chưa mở bán.</b>\nVui lòng quay lại sau hoặc liên hệ CSKH VIP.",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]]),
+                f"{vip_em('cross', '❌')} {t(lang, 'product_unavailable')}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]]),
                 parse_mode="HTML"
             )
             return
@@ -1525,33 +1711,33 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if sku == DEFAULT_SKU:
                 keyboard += [
                     [
-                        vip_btn("1 Link", callback_data="select_qty_1", emoji_name="crown"),
-                        vip_btn("2 Link", callback_data="select_qty_2", emoji_name="crown"),
+                        vip_btn(t(lang, "btn_qty_n", n=1), callback_data="select_qty_1", emoji_name="crown"),
+                        vip_btn(t(lang, "btn_qty_n", n=2), callback_data="select_qty_2", emoji_name="crown"),
                     ],
                     [
-                        vip_btn("4 Link", callback_data="select_qty_4", emoji_name="crown"),
-                        vip_btn("8 Link", callback_data="select_qty_8", emoji_name="crown"),
+                        vip_btn(t(lang, "btn_qty_n", n=4), callback_data="select_qty_4", emoji_name="crown"),
+                        vip_btn(t(lang, "btn_qty_n", n=8), callback_data="select_qty_8", emoji_name="crown"),
                     ],
                     [
-                        vip_btn("✏️ Nhập Số Lượng Tùy Chỉnh", callback_data="custom_qty", emoji_name="edit", style="primary")
+                        vip_btn(t(lang, "btn_custom_qty"), callback_data="custom_qty", emoji_name="edit", style="primary")
                     ],
                 ]
             else:
                 max_qty = sku_max_qty(sku)
                 if max_qty == 1:
-                    keyboard.append([vip_btn("🛒 Mua Ngay (1 tài khoản)", callback_data=cb_qty("select", sku, 1), emoji_name="crown", style="primary")])
+                    keyboard.append([vip_btn(t(lang, "btn_buy_one"), callback_data=cb_qty("select", sku, 1), emoji_name="crown", style="primary")])
                 else:
                     choices = [n for n in (1, 2, 4, 8) if n <= max_qty]
                     keyboard.append([vip_btn(f"{n}", callback_data=cb_qty("select", sku, n), emoji_name="crown") for n in choices])
-                    keyboard.append([vip_btn("✏️ Nhập Số Lượng Tùy Chỉnh", callback_data=f"cq:{sku}", emoji_name="edit", style="primary")])
+                    keyboard.append([vip_btn(t(lang, "btn_custom_qty"), callback_data=f"cq:{sku}", emoji_name="edit", style="primary")])
         if has_own_guide(sku):
-            keyboard.append([vip_btn("📖 Hướng Dẫn Sản Phẩm Này", callback_data=f"gd:{sku}", emoji_name="book")])
-        keyboard.append([vip_btn("🔙 Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
+            keyboard.append([vip_btn(t(lang, "btn_guide"), callback_data=f"gd:{sku}", emoji_name="book")])
+        keyboard.append([vip_btn(t(lang, "btn_back_shop"), callback_data="shop", emoji_name="back")])
 
-        await send_product_screen(query, sku, render_product_intro(sku, stock), keyboard)
+        await send_product_screen(query, sku, render_product_intro(sku, stock, lang), keyboard)
 
-    elif data.startswith("soldout_") and data[8:] in known_skus():
-        await query.answer("Sản phẩm này hiện đã hết hàng. Vui lòng quay lại sau!", show_alert=True)
+    elif data.startswith("soldout_") and data[8:] in listed_skus():
+        await query.answer(t(lang, "soldout_alert"), show_alert=True)
 
     elif data.startswith("select_qty_") or (sku_cb and sku_cb[0] == "sq"):
         if sku_cb:
@@ -1564,12 +1750,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 qty = 1
         stock = get_stock_count(sku)
         if sku != DEFAULT_SKU and (qty < 1 or qty > sku_max_qty(sku) or stock < qty):
-            reason = "Sản phẩm đã hết hàng!" if stock <= 0 else (
-                f"Mỗi đơn tối đa {sku_max_qty(sku)} sản phẩm!" if qty > sku_max_qty(sku) else f"Kho hiện chỉ còn {stock}!")
+            reason = t(lang, "alert_sold_out") if stock <= 0 else (
+                t(lang, "alert_max_per_order", limit=sku_max_qty(sku)) if qty > sku_max_qty(sku) else t(lang, "alert_only_left", stock=stock))
             await query.answer(reason, show_alert=True)
             return
         if stock < qty:
-            await query.answer(f"Kho hiện chỉ còn {stock} link khả dụng!", show_alert=True)
+            await query.answer(t(lang, "alert_only_left", stock=stock), show_alert=True)
         await show_order_confirmation(query, user, sku=sku, qty=qty)
 
     elif data == "custom_qty" or custom_sku is not None:
@@ -1577,17 +1763,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         AWAITING_QTY_USERS[user_id] = sku
         stock = get_stock_count(sku)
         prod = get_product(sku)
-        price_fmt = f"{prod['price']:,} VNĐ"
+        price_fmt = i18n.fmt_vnd(prod['price'])
         usdt_price = get_setting(usdt_setting_key(sku), "1")
         prompt_text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('memo', '✏️')} <b>NHẬP SỐ LƯỢNG TÙY CHỈNH</b> {vip_em('memo', '✏️')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"Vui lòng gửi tin nhắn chứa <b>số lượng link</b> bạn muốn đặt mua vào đây (Ví dụ: <code>3</code>, <code>5</code>, <code>10</code>...)\n\n"
-            f"{vip_em('chart', '🏷')} <b>Đơn giá ưu đãi:</b> <code>{price_fmt}</code> / link (hoặc <code>{usdt_price} USDT</code>)\n"
-            f"{vip_em('box', '📦')} <b>Hiện có trong kho:</b> <code>{stock}</code> link sẵn sàng\n\n"
-            f"{vip_em('lightning', '⚡️')} <i>Nhập số lượng từ 1 đến {sku_max_qty(sku)} link để hệ thống tự động tính hóa đơn VIP!</i>"
+            f"{vip_em('crown', '👑')} ═══════ {vip_em('memo', '✏️')} <b>{t(lang, 'qty_title')}</b> {vip_em('memo', '✏️')} ═══════ {vip_em('crown', '👑')}\n\n"
+            f"{t(lang, 'qty_body')}\n\n"
+            f"{vip_em('chart', '🏷')} <b>{t(lang, 'confirm_unit')}:</b> <code>{price_fmt}</code> ({t(lang, 'or_usdt')} <code>{usdt_price} USDT</code>)\n"
+            f"{vip_em('box', '📦')} <b>{t(lang, 'qty_in_stock')}:</b> <code>{t(lang, 'stock_available_value', stock=stock)}</code>\n\n"
+            f"{vip_em('lightning', '⚡️')} {t(lang, 'qty_range_hint', limit=sku_max_qty(sku))}"
         )
         keyboard = [
-            [vip_btn("🔙 Hủy & Chọn Lại", callback_data=cb_buy(sku), emoji_name="cross")]
+            [vip_btn(t(lang, "btn_cancel_reselect"), callback_data=cb_buy(sku), emoji_name="cross")]
         ]
         await safe_edit_or_reply(query, prompt_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -1595,7 +1781,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sku_cb:
             _, sku, qty = sku_cb
             if qty < 1 or qty > sku_max_qty(sku):
-                await query.answer(f"Mỗi đơn tối đa {sku_max_qty(sku)} sản phẩm!", show_alert=True)
+                await query.answer(t(lang, "alert_max_per_order", limit=sku_max_qty(sku)), show_alert=True)
                 return
         else:
             sku = DEFAULT_SKU
@@ -1607,8 +1793,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     qty = 1
 
         if not await asyncio.to_thread(sync_web_product_price, sku, True):
-            await safe_edit_or_reply(query, f"{vip_em('shield')} <b>Chưa thể lấy giá mới nhất.</b> Vui lòng thử lại sau.",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]]), parse_mode="HTML")
+            await safe_edit_or_reply(query, f"{vip_em('shield')} {t(lang, 'price_unavailable')}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]]), parse_mode="HTML")
             return
         prod = get_product(sku)
         stock = get_stock_count(sku)
@@ -1616,8 +1802,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if stock < qty:
             await safe_edit_or_reply(
                 query,
-                f"{vip_em('cross', '❌')} <b>Sản phẩm không đủ số lượng trong kho! (Còn {stock} link)</b>\nVui lòng giảm số lượng đặt mua.",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("🔄 Chọn Lại Số Lượng", callback_data=cb_buy(sku), emoji_name="refresh")]]),
+                f"{vip_em('cross', '❌')} {t(lang, 'stock_insufficient', stock=stock)}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_reselect_qty"), callback_data=cb_buy(sku), emoji_name="refresh")]]),
                 parse_mode="HTML"
             )
             return
@@ -1653,29 +1839,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Đồng bộ đơn hàng lên Web Dashboard wolfmod.xyz
         asyncio.create_task(sync_order_to_web_async(order_id, user_id, user.username or user.first_name, amount, "VND", "sepay", qty=qty, sku=sku))
 
-        bill_text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>HÓA ĐƠN GIAO DỊCH VIETQR VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🆔')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('box', '📦')} <b>Dịch vụ:</b> {prod['name']}\n"
-            f"{vip_em('sparkle', '✨')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-            f"{vip_em('money', '💵')} <b>Số tiền cần thanh toán:</b> <code>{amount:,} VNĐ</code>\n\n"
-            f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{bank_name}</code> (Ngân Hàng Á Châu)\n"
-            f"{vip_em('card', '💳')} <b>Số tài khoản:</b> <code>{bank_account}</code>\n"
-            f"{vip_em('user', '👤')} <b>Chủ tài khoản:</b> <code>{bank_owner}</code>\n"
-            f"{vip_em('memo', '📝')} <b>Nội dung chuyển khoản:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('calendar', '⏳')} <b>Thời hạn thanh toán:</b> <b>10 phút</b> (Hết hạn lúc: <code>{expires_display}</code>)\n"
-            f"{vip_em('lightning', '⚡️')} <i>Mẹo VIP: Quét mã QR ACB phía trên trên App ngân hàng để hệ thống tự điền đúng STK & Nội dung!</i>\n"
-            f"{vip_em('shield', '⚠️')} <i>Lưu ý: Đơn hàng sẽ tự động hủy sau 10 phút nếu chưa hoàn tất chuyển tiền.</i>"
-        )
-
-        buttons = [
-            [vip_btn("✅ TÔI ĐÃ CHUYỂN KHOẢN XONG", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-            [vip_btn(f"🪙 Đổi Sang Thanh Toán USDT ({total_usdt_str} USDT)", callback_data=f"switch_pay_usdt_{order_id}", emoji_name="usdt", style="success")],
-            [vip_btn("❌ HỦY GIAO DỊCH NÀY", callback_data=f"cancel_order_{order_id}", emoji_name="cross", style="danger")],
-            [vip_btn("🔙 VỀ SẢNH MENU CHÍNH", callback_data="main_menu", emoji_name="back")]
-        ]
+        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display)
+        buttons = build_vietqr_buttons(lang, order_id, total_usdt_str)
 
         qr_bytes = generate_vietqr_png_bytes(bank_name, bank_account, bank_owner, amount, order_id)
 
@@ -1725,7 +1890,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         if order and order["status"] == "pending":
             if order_sku(order) not in known_skus():
-                await query.answer("Sản phẩm của đơn này hiện không còn được bán.", show_alert=True)
+                await query.answer(t(lang, "sku_not_sold_alert"), show_alert=True)
                 return
             await show_plisio_checkout(query, user, int(order["quantity"] or 1), order_id, sku=order_sku(order))
 
@@ -1735,14 +1900,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
         conn.close()
         if not order or int(order["user_id"]) != int(user_id) or order["status"] != "pending":
-            await query.answer("Đơn hàng không hợp lệ.", show_alert=True)
+            await query.answer(t(lang, "order_invalid_alert"), show_alert=True)
             return
         sku = order_sku(order)
         if sku not in known_skus():
-            await query.answer("Sản phẩm của đơn này hiện không còn được bán.", show_alert=True)
+            await query.answer(t(lang, "sku_not_sold_alert"), show_alert=True)
             return
         if not await asyncio.to_thread(sync_web_product_price, sku, True):
-            await query.answer("Chưa thể lấy giá mới nhất, vui lòng thử lại.", show_alert=True)
+            await query.answer(t(lang, "price_unavailable_alert"), show_alert=True)
             return
         qty = 1
         if order and "quantity" in order.keys() and order["quantity"]:
@@ -1770,7 +1935,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_usdt = round(usdt_unit * qty, 2)
         total_usdt_str = str(int(total_usdt)) if total_usdt.is_integer() else str(total_usdt)
 
-        expires_display = "10 phút"
+        expires_display = t(lang, "bill_ten_minutes")
         if order and "expires_at" in order.keys() and order["expires_at"]:
             try:
                 exp_dt = datetime.strptime(order["expires_at"], "%Y-%m-%d %H:%M:%S")
@@ -1778,29 +1943,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-        bill_text = (
-            f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>HÓA ĐƠN GIAO DỊCH VIETQR VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-            f"{vip_em('tag', '🆔')} <b>Mã đơn hàng VIP:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('box', '📦')} <b>Dịch vụ:</b> {prod['name']}\n"
-            f"{vip_em('sparkle', '✨')} <b>Số lượng:</b> <b>{qty} link</b>\n"
-            f"{vip_em('money', '💵')} <b>Số tiền cần thanh toán:</b> <code>{amount:,} VNĐ</code>\n\n"
-            f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{bank_name}</code> (Ngân Hàng Á Châu)\n"
-            f"{vip_em('card', '💳')} <b>Số tài khoản:</b> <code>{bank_account}</code>\n"
-            f"{vip_em('user', '👤')} <b>Chủ tài khoản:</b> <code>{bank_owner}</code>\n"
-            f"{vip_em('memo', '📝')} <b>Nội dung chuyển khoản:</b> <code>{order_id}</code>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{vip_em('calendar', '⏳')} <b>Thời hạn thanh toán:</b> <b>10 phút</b> (Hết hạn lúc: <code>{expires_display}</code>)\n"
-            f"{vip_em('lightning', '⚡️')} <i>Mẹo VIP: Quét mã QR ACB phía trên trên App ngân hàng để hệ thống tự điền đúng STK & Nội dung!</i>\n"
-            f"{vip_em('shield', '⚠️')} <i>Lưu ý: Đơn hàng sẽ tự động hủy sau 10 phút nếu chưa hoàn tất chuyển tiền.</i>"
-        )
-
-        buttons = [
-            [vip_btn("✅ TÔI ĐÃ CHUYỂN KHOẢN XONG", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-            [vip_btn(f"🪙 Đổi Sang Thanh Toán USDT ({total_usdt_str} USDT)", callback_data=f"switch_pay_usdt_{order_id}", emoji_name="usdt", style="success")],
-            [vip_btn("❌ HỦY GIAO DỊCH NÀY", callback_data=f"cancel_order_{order_id}", emoji_name="cross", style="danger")],
-            [vip_btn("🔙 VỀ SẢNH MENU CHÍNH", callback_data="main_menu", emoji_name="back")]
-        ]
+        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display)
+        buttons = build_vietqr_buttons(lang, order_id, total_usdt_str)
 
         qr_bytes = generate_vietqr_png_bytes(bank_name, bank_account, bank_owner, amount, order_id)
         try:
@@ -1840,27 +1984,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
 
         if not order:
-            await query.answer("❌ Đơn hàng không tồn tại!", show_alert=True)
+            await query.answer(t(lang, "order_not_found"), show_alert=True)
             return
 
         if int(order["user_id"]) != int(user_id):
-            await query.answer("❌ Đơn hàng không tồn tại!", show_alert=True)
+            await query.answer(t(lang, "order_not_found"), show_alert=True)
             return
 
         if order["status"] == "completed":
             if not order["delivery_notified_at"]:
                 sent = await send_paid_order_delivery(context.bot, order_id, user_id)
-                await query.answer("Đã gửi link." if sent else "Đang thử gửi link, vui lòng thử lại.", show_alert=True)
+                await query.answer(t(lang, "delivery_sent" if sent else "delivery_retry"), show_alert=True)
                 return
             links = (order["item_delivered"] or "").splitlines()
             if links:
-                msg_body, link_buttons = format_delivered_links_message(order_id, links, order_sku(order))
+                msg_body, link_buttons = format_delivered_links_message(order_id, links, order_sku(order), lang)
                 await query.message.reply_text(msg_body, reply_markup=InlineKeyboardMarkup(link_buttons), parse_mode="HTML")
                 conn = get_db_connection()
                 conn.execute("UPDATE orders SET delivery_notified_at = CURRENT_TIMESTAMP WHERE order_id = ? AND user_id = ?", (order_id, user_id))
                 conn.commit()
                 conn.close()
-            await query.answer("✅ Đơn hàng đã được bàn giao.", show_alert=True)
+            await query.answer(t(lang, "order_delivered_alert"), show_alert=True)
             return
 
         # Confirm the provider status before local expiry/cancellation checks. VietQR
@@ -1868,28 +2012,26 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         web_stat = check_web_order_status(order_id)
         if web_stat.get("status") in ("paid", "delivered"):
             if await send_paid_order_delivery(context.bot, order_id, user_id):
-                await query.answer("Giao dịch đã được xác nhận thành công!", show_alert=True)
+                await query.answer(t(lang, "payment_confirmed_alert"), show_alert=True)
                 return
 
-            await query.answer("Đã nhận thanh toán; đang chờ xử lý link.", show_alert=True)
+            await query.answer(t(lang, "payment_waiting_alert"), show_alert=True)
             await query.message.reply_text(
-                f"{vip_em('check', '✅')} <b>Thanh toán đã được xác nhận cho đơn <code>{html.escape(order_id)}</code>.</b>\n"
-                f"{vip_em('calendar', '⏳')} Link chưa thể giao tự động lúc này.\n"
-                f"{vip_em('chat', '💬')} Vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")]]),
+                f"{vip_em('check', '✅')} {t(lang, 'pay_confirmed_head', order_id=html.escape(order_id))}\n"
+                f"{vip_em('calendar', '⏳')} {t(lang, 'pay_no_auto')}\n"
+                f"{vip_em('chat', '💬')} {t(lang, 'pay_contact_admin')}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_contact_admin"), url="https://t.me/wolfmodyt", emoji_name="chat")]]),
                 parse_mode="HTML"
             )
             return
 
         # Kiểm tra nếu đơn hàng đã bị hủy hoặc hết hạn
         if order["status"] in ("cancelled", "expired"):
-            await query.answer("❌ Đơn hàng này đã hết hạn 10 phút hoặc đã bị hủy!", show_alert=True)
+            await query.answer(t(lang, "order_expired_alert"), show_alert=True)
             await safe_edit_or_reply(
                 query,
-                f"{vip_em('cross', '❌')} <b>ĐƠN HÀNG <code>{order_id}</code> ĐÃ HẾT HẠN THANH TOÁN!</b>\n\n"
-                f"{vip_em('calendar', '⏳')} Thời gian chờ 10 phút cho đơn hàng đã kết thúc và đơn đã được tự động hủy. Nếu đã chuyển khoản, vui lòng liên hệ @wolfmodyt để được hỗ trợ.\n\n"
-                f"{vip_em('lightning', '⚡️')} <i>Quý Khách vui lòng tạo đơn hàng mới:</i>",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("Đặt Mua Đơn Mới", callback_data=cb_buy(order_sku(order)), emoji_name="crown", style="primary")]]),
+                f"{vip_em('cross', '❌')} {t(lang, 'order_expired_text', order_id=order_id)}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_new_order"), callback_data=cb_buy(order_sku(order)), emoji_name="crown", style="primary")]]),
                 parse_mode="HTML"
             )
             return
@@ -1915,13 +2057,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             conn.close()
 
-            await query.answer("❌ Đơn hàng đã hết hạn 10 phút!", show_alert=True)
+            await query.answer(t(lang, "order_expired_alert_short"), show_alert=True)
             await safe_edit_or_reply(
                 query,
-                f"{vip_em('cross', '❌')} <b>ĐƠN HÀNG <code>{order_id}</code> ĐÃ HẾT HẠN THANH TOÁN!</b>\n\n"
-                f"{vip_em('calendar', '⏳')} Đơn hàng chỉ có hiệu lực trong <b>10 phút</b>. Đơn này đã quá hạn và hệ thống đã hủy đơn. Nếu đã chuyển khoản, vui lòng liên hệ @wolfmodyt để được hỗ trợ.\n\n"
-                f"{vip_em('lightning', '⚡️')} <i>Quý Khách vui lòng tạo đơn mới để nhận mã QR chuyển khoản hợp lệ:</i>",
-                reply_markup=InlineKeyboardMarkup([[vip_btn("Đặt Mua Đơn Mới", callback_data=cb_buy(order_sku(order)), emoji_name="crown", style="primary")]]),
+                f"{vip_em('cross', '❌')} {t(lang, 'order_expired_text', order_id=order_id)}",
+                reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_new_order"), callback_data=cb_buy(order_sku(order)), emoji_name="crown", style="primary")]]),
                 parse_mode="HTML"
             )
             return
@@ -1936,21 +2076,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Status was checked before the local expiry guard above.
         status = web_stat.get("status")
         if status in ("paid", "delivered"):
-            notice = "<b>Thanh toán đã được xác nhận nhưng link chưa sẵn sàng.</b>"
+            notice = t(lang, "check_paid_no_link")
         elif status == "pending" or status == "not_found" or web_stat.get("found") is False:
-            notice = "<b>Hệ thống chưa nhận được thanh toán cho đơn hàng này.</b>"
+            notice = t(lang, "check_not_received")
         else:
-            notice = "<b>Hiện chưa kiểm tra được trạng thái thanh toán.</b>"
+            notice = t(lang, "check_unknown")
         await query.message.reply_text(
-            f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>KIỂM TRA THANH TOÁN VIP</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
-            f"{vip_em('tag')} <b>Mã đơn:</b> <code>{html.escape(order_id)}</code>\n\n"
+            f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>{t(lang, 'check_title')}</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
+            f"{vip_em('tag')} <b>{t(lang, 'check_order')}:</b> <code>{html.escape(order_id)}</code>\n\n"
             f"{vip_em('shield')} {notice}\n\n"
-            f"{vip_em('chat')} Nếu bạn đã chuyển khoản, vui lòng liên hệ admin <b>@wolfmodyt</b> để được hỗ trợ.\n"
-            f"{vip_em('calendar')} Nếu chưa chuyển, hãy thanh toán theo hóa đơn rồi bấm kiểm tra lại.",
+            f"{vip_em('chat')} {t(lang, 'check_footer')}",
             reply_markup=InlineKeyboardMarkup([
-                [vip_btn("Kiểm Tra Thanh Toán", callback_data=f"confirm_pay_{order_id}", emoji_name="refresh", style="primary")],
-                [vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")],
-                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+                [vip_btn(t(lang, "btn_check_again"), callback_data=f"confirm_pay_{order_id}", emoji_name="refresh", style="primary")],
+                [vip_btn(t(lang, "btn_contact_admin"), url="https://t.me/wolfmodyt", emoji_name="chat")],
+                [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML"
         )
 
@@ -1963,52 +2102,52 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await safe_edit_or_reply(
             query,
-            f"{vip_em('cross', '❌')} <b>Đã hủy giao dịch đơn hàng <code>{order_id}</code>.</b>",
-            reply_markup=InlineKeyboardMarkup([[vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]]),
+            f"{vip_em('cross', '❌')} {t(lang, 'cancelled_text', order_id=html.escape(order_id))}",
+            reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]]),
             parse_mode="HTML"
         )
 
     elif data == "my_orders" or (view_cb and view_cb[0] == "ordp"):
         # Bấm "Đơn hàng" mới hiện đơn của chính khách (có phân trang); màn chính không liệt kê đơn.
-        orders_text, orders_markup = render_orders_page(user_id, 1 if data == "my_orders" else view_cb[1])
+        orders_text, orders_markup = render_orders_page(user_id, 1 if data == "my_orders" else view_cb[1], lang)
         await safe_edit_or_reply(query, orders_text, reply_markup=orders_markup, parse_mode="HTML")
 
     elif view_cb and view_cb[0] == "gd":
         # Hướng dẫn chỉ của đúng sản phẩm này; chưa có thì báo trung tính, không mượn hướng dẫn sản phẩm khác.
         sku = view_cb[1]
-        guide_text = render_guide(sku)
+        guide_text = render_guide(sku, lang)
         keyboard = []
         if sku in known_skus():
-            keyboard.append([vip_btn(" Xem Sản Phẩm Này", callback_data=cb_buy(sku), emoji_name="lightning", style="success")])
-        keyboard.append([vip_btn("Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="diamond")])
-        keyboard.append([vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")])
-        await safe_edit_or_reply(query, guide_text if guide_text is not None else f"{vip_em('shield', '🛡')} {NO_GUIDE_TEXT}",
+            keyboard.append([vip_btn(t(lang, "btn_view_product"), callback_data=cb_buy(sku), emoji_name="lightning", style="success")])
+        keyboard.append([vip_btn(t(lang, "btn_my_orders"), callback_data="my_orders", emoji_name="diamond")])
+        keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
+        await safe_edit_or_reply(query, guide_text if guide_text is not None else f"{vip_em('shield', '🛡')} {t(lang, 'guide_none')}",
                                  reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "guide":
         # Nút cũ còn sót trong tin nhắn đã gửi: hướng dẫn không còn là màn chung.
         await safe_edit_or_reply(
             query,
-            f"{vip_em('book', '📖')} Hướng dẫn nằm trong từng sản phẩm (màn chi tiết sản phẩm) và trong đơn hàng của sản phẩm đó.",
+            f"{vip_em('book', '📖')} {t(lang, 'guide_moved')}",
             reply_markup=InlineKeyboardMarkup([
-                [vip_btn("Đơn Hàng Của Tôi", callback_data="my_orders", emoji_name="diamond")],
-                [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+                [vip_btn(t(lang, "btn_my_orders"), callback_data="my_orders", emoji_name="diamond")],
+                [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
 
     elif data == "support":
         contact = get_setting("support_contact", "@wolfmodyt")
         clean_contact = contact.replace("@", "")
         supp_text = (
-            f"{vip_em('shield', '🛡')} ═══════ {vip_em('diamond', '💎')} <b>TRUNG TÂM HỖ TRỢ VIP 24/7</b> {vip_em('diamond', '💎')} ═══════ {vip_em('shield', '🛡')}\n\n"
-            "Quý khách cần hỗ trợ kích hoạt gói Google AI Plus, kiểm tra đơn hàng hoặc tư vấn kỹ thuật, vui lòng liên hệ trực tiếp Admin & CSKH VIP:\n\n"
-            f"{vip_em('crown', '👑')} <b>Admin Quản Trị:</b> <a href=\"https://t.me/{clean_contact}\">@{clean_contact}</a>\n"
-            f"{vip_em('lightning', '⚡️')} <b>Thời gian hỗ trợ:</b> Trực tuyến 24/7 (Phản hồi < 3 phút)\n"
-            f"{vip_em('globe', '🌐')} <b>Cổng Web Portal:</b> <a href=\"https://www.wolfmod.xyz\">wolfmod.xyz</a>\n\n"
-            f"{vip_em('star', '⚜️')} <i>WolfMod cam kết bảo hành uy tín và hỗ trợ kỹ thuật tận tâm cho Quý Khách!</i>"
+            f"{vip_em('shield', '🛡')} ═══════ {vip_em('diamond', '💎')} <b>{t(lang, 'support_title')}</b> {vip_em('diamond', '💎')} ═══════ {vip_em('shield', '🛡')}\n\n"
+            f"{t(lang, 'support_body')}\n\n"
+            f"{vip_em('crown', '👑')} <b>{t(lang, 'support_admin')}:</b> <a href=\"https://t.me/{clean_contact}\">@{clean_contact}</a>\n"
+            f"{vip_em('lightning', '⚡️')} <b>{t(lang, 'support_hours')}:</b> {t(lang, 'support_hours_value')}\n"
+            f"{vip_em('globe', '🌐')} <b>{t(lang, 'support_web')}:</b> <a href=\"https://www.wolfmod.xyz\">wolfmod.xyz</a>\n\n"
+            f"{vip_em('star', '⚜️')} {t(lang, 'support_footer')}"
         )
         keyboard = [
-            [vip_btn("Nhắn Tin Cho Admin @wolfmodyt", url=f"https://t.me/{clean_contact}", emoji_name="chat")],
-            [vip_btn("Trở Về Menu Chính", callback_data="main_menu", emoji_name="back")]
+            [vip_btn(t(lang, "btn_msg_admin", contact=clean_contact), url=f"https://t.me/{clean_contact}", emoji_name="chat")],
+            [vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]
         ]
         await safe_edit_or_reply(query, supp_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML", disable_web_page_preview=True)
 
@@ -2107,7 +2246,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             # Bắn link cho khách
-            msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links, order_sku(order))
+            msg_body, link_buttons = format_delivered_links_message(order_id, delivered_links, order_sku(order), get_user_lang(order["user_id"]))
             try:
                 await context.bot.send_message(
                     chat_id=order["user_id"],
@@ -2133,7 +2272,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=order["user_id"],
-                    text=f"{vip_em('cross', '❌')} Rất tiếc, đơn hàng <code>{order_id}</code> của bạn đã bị từ chối do không tìm thấy giao dịch hợp lệ. Vui lòng liên hệ Admin nếu có nhầm lẫn.",
+                    text=f"{vip_em('cross', '❌')} {t(get_user_lang(order['user_id']), 'order_rejected', order_id=html.escape(str(order_id)))}",
                     parse_mode="HTML"
                 )
             except Exception:
@@ -2242,14 +2381,84 @@ async def admin_set_test_mode(update: Update, context: ContextTypes.DEFAULT_TYPE
     status_str = "🟢 ĐÃ BẬT" if val == "true" else "🔴 ĐÃ TẮT"
     await update.message.reply_text(f"{vip_em('crown', '🛠️')} <b>Chế độ Test Mode:</b> {status_str}", parse_mode="HTML")
 
-def format_stock_added_notification(added_count: int, total_stock: int, sample_links: list = None) -> str:
-    """Định dạng thông báo thêm link mới với thẻ VIP Custom Emoji Telegram Premium (Tuyệt đối bảo mật, không để lộ link)"""
-    return (
-        f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>THÔNG BÁO KHO HÀNG VIP</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
-        f"{vip_em('party', '🎉')} <b>Hệ thống vừa cập nhật thêm <code>+{added_count}</code> link offer Gemini!</b>\n\n"
-        f"├─ {vip_em('sparkle', '✨')} <b>Gói dịch vụ:</b> <b>Google AI Plus 400GB (12 Tháng)</b>\n"
-        f"└─ {vip_em('box', '📦')} <b>Tổng kho khả dụng:</b> <code>{total_stock}</code> link"
-    )
+# ==================== THÔNG BÁO NHẬP KHO (khách) ====================
+STOCK_WATCH_SEC = 60
+STOCK_NOTIFIER = stock_notify.StockNotifier()
+_last_stock_seen: dict[str, int] = {}
+
+
+def format_stock_added_notification(added_count: int, total_stock: int, sample_links: list = None,
+                                    sku: str = DEFAULT_SKU, lang: str = "vi") -> str:
+    """Thông báo nhập kho theo ngôn ngữ người nhận: tên đầy đủ + quyền lợi chính + giá + tồn kho.
+    Tuyệt đối không in link/tài khoản (sample_links bị bỏ qua) và không in mã kỹ thuật (SKU)."""
+    return stock_notify.build_message(
+        lang, name=sku_title(sku, lang), features=product_content.features(sku, lang),
+        price_vnd=sku_price_vnd(sku), stock=total_stock, added=added_count, em=vip_em)
+
+
+def stock_notification_keyboard(sku: str, lang: str) -> InlineKeyboardMarkup:
+    """Nút 'Mua ngay' mở thẳng trang chi tiết sản phẩm (cùng callback buy_<sku> như menu)."""
+    return InlineKeyboardMarkup([[vip_btn(t(lang, "btn_buy_now"), callback_data=cb_buy(sku), emoji_name="crown", style="primary")]])
+
+
+def get_stock_recipients() -> list:
+    """Người nhận thông báo nhập kho: admin, kênh `notify_channel` (nếu đặt) và – chỉ khi bật setting
+    `stock_notify_customers=true` – mọi khách đã từng dùng bot/đặt hàng. Mỗi người kèm ngôn ngữ của họ."""
+    recipients: list = []
+    try:
+        admin_chat = int(ADMIN_ID)
+        recipients.append((admin_chat, get_user_lang(admin_chat)))
+    except (TypeError, ValueError):
+        pass
+    channel = get_setting("notify_channel", "").strip()
+    if channel:
+        recipients.append((channel, get_setting("notify_channel_lang", "vi")))
+    if get_setting("stock_notify_customers", "false").lower() == "true":
+        conn = get_db_connection()
+        try:
+            ids = {int(r[0]) for r in conn.execute("SELECT user_id FROM user_lang").fetchall()}
+            ids |= {int(r[0]) for r in conn.execute("SELECT DISTINCT user_id FROM orders").fetchall()}
+        finally:
+            conn.close()
+        recipients += [(uid, get_user_lang(uid)) for uid in sorted(ids)]
+    return recipients
+
+
+async def send_stock_notifications(bot, sku: str, added: int) -> int:
+    """Gửi MỖI nhóm ngôn ngữ một bản thông báo (kèm nút Mua ngay). Trả về số tin gửi thành công."""
+    stock = await asyncio.to_thread(get_stock_count, sku)
+    sent = 0
+    for lang, chat_ids in stock_notify.group_by_lang(get_stock_recipients()).items():
+        text = format_stock_added_notification(added, stock, sku=sku, lang=lang)
+        markup = stock_notification_keyboard(sku, lang)
+        for chat_id in chat_ids:
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode="HTML")
+                sent += 1
+            except Exception as error:  # noqa: BLE001 - một người chặn bot không được làm hỏng cả đợt
+                logger.warning("Không gửi được thông báo nhập kho: %s", type(error).__name__)
+    return sent
+
+
+async def stock_watch_task(application: Application):
+    """Mỗi ~60 giây so sánh tồn kho từng SKU; tăng thì ghi nhận, gộp các lần nhập trong 5 phút thành MỘT tin / sản phẩm."""
+    while True:
+        try:
+            await asyncio.sleep(STOCK_WATCH_SEC)
+            if get_setting("stock_notify_enabled", "true").lower() != "true":
+                continue
+            for sku in known_skus():
+                count = await asyncio.to_thread(get_stock_count, sku)
+                previous = _last_stock_seen.get(sku)
+                if previous is not None and count > previous:
+                    STOCK_NOTIFIER.record(sku, count - previous)
+                _last_stock_seen[sku] = count
+            for sku, added in STOCK_NOTIFIER.pop_due():
+                await send_stock_notifications(application.bot, sku, added)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            logger.warning("stock_watch_task lỗi: %s", type(error).__name__)
 
 async def watch_and_notify_new_links(app: Application):
     """ĐÃ TẮT HOÀN TOÀN THEO YÊU CẦU: Không tự ý quét file claimed_links.txt hay nạp link từ máy.
@@ -2301,7 +2510,11 @@ async def admin_add_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if added > 0:
         push_stock_to_web("gemini_plus", links)
     total_avail = get_stock_count("gemini_plus")
-    reply_msg = format_stock_added_notification(added, total_avail, links)
+    if added > 0:
+        # Ghi nhận để gộp vào thông báo khách (và tránh stock_watch_task đếm lại lần tăng này).
+        STOCK_NOTIFIER.record("gemini_plus", added)
+        _last_stock_seen["gemini_plus"] = total_avail
+    reply_msg = format_stock_added_notification(added, total_avail, links, sku="gemini_plus", lang=get_user_lang(user.id))
     await update.message.reply_text(reply_msg, parse_mode="HTML")
 
 async def admin_handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2374,10 +2587,10 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
     # Nếu người dùng đang trong luồng nhập số lượng tùy chỉnh
     if user_id in AWAITING_QTY_USERS:
         sku = AWAITING_QTY_USERS[user_id]
+        lang = get_user_lang(user_id)
         if not raw_text.isdigit():
             await update.message.reply_text(
-                f"{vip_em('cross', '❌')} <b>Vui lòng chỉ nhập số nguyên dương hợp lệ!</b>\n"
-                f"Ví dụ: <code>3</code>, <code>5</code>, <code>10</code>...",
+                f"{vip_em('cross', '❌')} {t(lang, 'qty_not_number')}",
                 parse_mode="HTML"
             )
             return
@@ -2385,7 +2598,7 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
         qty = int(raw_text)
         if qty <= 0:
             await update.message.reply_text(
-                f"{vip_em('cross', '❌')} <b>Số lượng mua tối thiểu là 1 link!</b>\nVui lòng nhập lại:",
+                f"{vip_em('cross', '❌')} {t(lang, 'qty_min')}",
                 parse_mode="HTML"
             )
             return
@@ -2393,8 +2606,7 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
         qty_limit = sku_max_qty(sku)
         if qty > qty_limit:
             await update.message.reply_text(
-                f"{vip_em('shield', '⚠️')} <b>Số lượng đặt mua tối đa mỗi đơn là {qty_limit} link!</b>\n"
-                f"Nếu muốn mua số lượng lớn hơn, vui lòng chia làm nhiều đơn hoặc liên hệ CSKH VIP.",
+                f"{vip_em('shield', '⚠️')} {t(lang, 'qty_max', limit=qty_limit)}",
                 parse_mode="HTML"
             )
             return
@@ -2402,8 +2614,7 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
         stock = get_stock_count(sku)
         if stock < qty:
             await update.message.reply_text(
-                f"{vip_em('box', '📦')} <b>Kho hiện chỉ còn {stock} link khả dụng!</b>\n"
-                f"Bạn có thể đặt tối đa <b>{stock}</b> link hoặc liên hệ Admin nhập thêm hàng.",
+                f"{vip_em('box', '📦')} {t(lang, 'qty_stock_short', stock=stock)}",
                 parse_mode="HTML"
             )
             return
@@ -2470,14 +2681,13 @@ async def auto_cancel_expired_orders_task(application: Application):
 
                 # Gửi thông báo đến khách hàng trên Telegram
                 try:
+                    ulang = get_user_lang(user_id)
                     cancel_msg = (
-                        f"{vip_em('cross', '❌')} <b>ĐƠN HÀNG <code>{order_id}</code> ĐÃ HẾT HẠN THANH TOÁN!</b>\n\n"
-                        f"{vip_em('calendar', '⏳')} Thời hạn <b>10 phút</b> cho đơn hàng đã kết thúc nên hệ thống đã tự động hủy giao dịch này.\n\n"
-                        f"{vip_em('lightning', '⚡️')} <i>Nếu Quý Khách vẫn có nhu cầu mua gói, vui lòng bấm nút bên dưới để đặt đơn mới:</i>"
+                        f"{vip_em('cross', '❌')} {t(ulang, 'expired_auto', order_id=html.escape(str(order_id)))}"
                     )
                     kb = [
-                        [vip_btn("Đặt Mua Đơn Mới", callback_data=cb_buy(order_sku(ord_row)), emoji_name="crown", style="primary")],
-                        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")]
+                        [vip_btn(t(ulang, "btn_new_order"), callback_data=cb_buy(order_sku(ord_row)), emoji_name="crown", style="primary")],
+                        [vip_btn(t(ulang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]
                     ]
                     await application.bot.send_message(
                         chat_id=int(user_id),
@@ -2520,11 +2730,13 @@ def run_shop_bot(token=None):
         logger.info("Số đơn đã cấp link đang chờ gửi Telegram: %s", awaiting)
         asyncio.create_task(auto_cancel_expired_orders_task(application))
         asyncio.create_task(auto_deliver_paid_orders_task(application))
+        asyncio.create_task(stock_watch_task(application))
 
     app = Application.builder().token(use_token).post_init(post_init_hook).build()
 
     # User commands (hỗ trợ cả /start, .start, /menu, .menu, /help, .help)
     app.add_handler(CommandHandler(["start", "menu", "help"], start_command))
+    app.add_handler(CommandHandler("language", language_command))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"(?i)^[\/\.](start|menu|help|shop|store)\b"), start_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
 

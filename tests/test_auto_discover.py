@@ -59,6 +59,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(lambda: shop_bot._catalogue.update(items=None, next=0.0))
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
+        shop_bot.set_setting("default_lang", "vi")  # legacy tests assert the Vietnamese UI
 
     def web(self, *products):
         return patch.object(shop_bot, "_fetch_catalogue_payload", return_value=payload(*products))
@@ -76,7 +77,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(NEW, shop_bot.SHOP_SKUS)
         with self.web(item(PLUS), item(NEW, name="Premium VPN 1 Year", price=99000)), self.stock_everywhere():
             self.assertTrue(shop_bot.refresh_catalogue(force=True))
-            keyboard = shop_bot.main_menu_keyboard(1)
+            keyboard = shop_bot.shop_keyboard(1)
         self.assertIn(f"buy_{NEW}", datas(keyboard))
         self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" in t for t in texts(keyboard)))
         self.assertEqual(datas(keyboard)[0], "buy_gemini_plus")
@@ -101,7 +102,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
     def test_out_of_stock_web_product_is_listed_as_sold_out_and_not_buyable(self):
         with self.web(item(PLUS), item(NEW, in_stock=False)):
             shop_bot.refresh_catalogue(force=True)
-            keyboard = shop_bot.main_menu_keyboard(1)
+            keyboard = shop_bot.shop_keyboard(1)
         self.assertIn(f"soldout_{NEW}", datas(keyboard))
         self.assertNotIn(f"buy_{NEW}", datas(keyboard))
         self.assertTrue(any("HẾT HÀNG" in t for t in texts(keyboard)))
@@ -113,7 +114,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
         with self.stock_everywhere(0), patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render:
             await shop_bot.callback_handler(make_update(query), SimpleNamespace())
         self.assertIn("HẾT HÀNG", render.await_args.args[1])
-        self.assertEqual(datas(render.await_args.kwargs["reply_markup"]), ["main_menu"])
+        self.assertEqual(datas(render.await_args.kwargs["reply_markup"]), ["shop"])
 
     async def test_deactivated_product_disappears_after_next_refresh(self):
         with self.web(item(PLUS), item(NEW)):
@@ -122,7 +123,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
             shop_bot.refresh_catalogue(force=True)
         self.assertNotIn(NEW, shop_bot.known_skus())
         with self.stock_everywhere():
-            self.assertNotIn(f"buy_{NEW}", datas(shop_bot.main_menu_keyboard(1)))
+            self.assertNotIn(f"buy_{NEW}", datas(shop_bot.shop_keyboard(1)))
         # an old button for it creates no order
         query = make_query(shop_bot.cb_qty("vietqr", NEW, 1))
         with self.stock_everywhere(), patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock), \
@@ -137,7 +138,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(shop_bot.refresh_catalogue(force=True))
         self.assertEqual(shop_bot.known_skus(), shop_bot.SHOP_SKUS)
         with self.stock_everywhere():
-            self.assertIn(f"buy_{PRO}", datas(shop_bot.main_menu_keyboard(1)))  # menu is not empty
+            self.assertIn(f"buy_{PRO}", datas(shop_bot.shop_keyboard(1)))  # menu is not empty
 
     def test_api_error_after_success_keeps_the_last_good_catalogue(self):
         with self.web(item(NEW)):
@@ -260,7 +261,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
         with self.web(item(PLUS, name="Renamed on web", price=1), item(NEW)):
             shop_bot.refresh_catalogue(force=True)
         with self.stock_everywhere(7):
-            keyboard = shop_bot.main_menu_keyboard(1)
+            keyboard = shop_bot.shop_keyboard(1)
         first = keyboard.inline_keyboard[0][0]
         self.assertEqual(first.callback_data, "buy_gemini_plus")
         self.assertIn("MUA GOOGLE AI PLUS 12 THÁNG", first.text)

@@ -71,6 +71,7 @@ class OrdersGuidesTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(lambda: shop_bot._catalogue.update(items=None, next=0.0))
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
+        shop_bot.set_setting("default_lang", "vi")  # legacy tests assert the Vietnamese UI
 
     def add_order(self, order_id, sku, user=123, status="completed", item="content", at="2026-11-06 10:00:00"):
         conn = shop_bot.get_db_connection()
@@ -253,10 +254,12 @@ class OrdersGuidesTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(product_guides.has_guide(NEW))
         self.assertIsNone(product_guides.get_guide(NEW))
         self.assertIsNone(shop_bot.render_guide(NEW))
-        for sku, guide in product_guides.GUIDES.items():
-            for key in ("title", "intro", "steps", "notes_title", "notes"):
-                self.assertTrue(guide.get(key), (sku, key))
-            self.assertTrue(all(len(note) == 3 for note in guide["notes"]), sku)
+        for sku, by_lang in product_guides.GUIDES.items():
+            self.assertEqual(set(by_lang), {"vi", "en"}, sku)  # every guide exists in both languages
+            for lang, guide in by_lang.items():
+                for key in ("title", "intro", "steps", "notes_title", "notes"):
+                    self.assertTrue(guide.get(key), (sku, lang, key))
+                self.assertTrue(all(len(note) == 3 for note in guide["notes"]), (sku, lang))
 
     def test_view_callbacks_are_validated_and_fit_telegram_limit(self):
         self.assertEqual(shop_bot.parse_view_callback(f"gd:{PRO}"), ("gd", PRO))

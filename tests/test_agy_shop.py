@@ -27,6 +27,7 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(price_refresh.stop)
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
+        shop_bot.set_setting("default_lang", "vi")  # legacy tests assert the Vietnamese UI
 
     async def test_paid_delivery_retries_telegram_without_claiming_twice(self):
         conn = shop_bot.get_db_connection()
@@ -127,7 +128,7 @@ class AgyShopTests(unittest.IsolatedAsyncioTestCase):
             await shop_bot.show_order_confirmation(target, SimpleNamespace(id=123), qty=4)
         text = send.await_args.args[1]
         self.assertIn('emoji-id="5807868868886009920"', text)
-        self.assertIn("4 link", text)
+        self.assertIn("Số lượng đặt mua:</b> <b>4</b>", text)
         self.assertIn("80,000 VNĐ", text)
         buttons = send.await_args.kwargs["reply_markup"].inline_keyboard
         self.assertEqual(buttons[0][0].callback_data, "create_order_vietqr_4")
