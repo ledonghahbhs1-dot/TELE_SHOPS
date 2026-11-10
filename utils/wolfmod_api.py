@@ -11,9 +11,9 @@ import aiohttp
 from yarl import URL
 
 
-# Only these signed server routes may be called (the shop bot's own API and the read-only wallet link routes).
-SIGNED_PREFIXES = ("/api/bot/", "/api/tg/wallet/")
-SIGNED_EXACT = ("/api/tg/wallet",)
+# Only the shop bot's own signed API may be called (the web wallet-link routes were retired: the wallet is the bot's own).
+SIGNED_PREFIXES = ("/api/bot/",)
+SIGNED_EXACT = ()
 
 
 class WolfmodError(Exception):
