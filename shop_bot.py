@@ -464,15 +464,35 @@ def sync_web_product_price(prod_id="gemini_plus", force=False):
 
 _web_stock_cache: dict[str, tuple[float, int]] = {}
 
-def get_product_banner_path(sku: str) -> str | None:
-    """Trả về đường dẫn file ảnh banner của sản phẩm nếu tồn tại (mỗi dịch vụ có 1 ảnh riêng)"""
-    custom_map = {
-        "gemini_plus": os.path.join(BASE_DIR, "assets", "gemini_plus.jpg")
-    }
-    path = custom_map.get(sku) or os.path.join(BASE_DIR, "assets", f"{sku}.jpg")
-    if os.path.exists(path):
-        return path
+BANNER_DIR = os.path.join(BASE_DIR, "assets", "products")
+BANNER_EXTS = (".png", ".jpg", ".jpeg")
+
+
+def get_product_banner_path(sku: str, lang: str | None = None) -> str | None:
+    """Ảnh banner của sản phẩm theo ngôn ngữ: assets/products/<sku>_<lang>.(png|jpg); thiếu thì dùng ảnh ngôn ngữ kia;
+    cuối cùng là ảnh cũ assets/<sku>.jpg; SKU không có ảnh -> None (chỉ văn bản)."""
+    try:
+        lang = i18n.normalize_lang(lang or get_default_lang())
+    except Exception:
+        lang = "vi"
+    other = "en" if lang == "vi" else "vi"
+    candidates = [os.path.join(BANNER_DIR, f"{sku}_{lg}{ext}") for lg in (lang, other) for ext in BANNER_EXTS]
+    candidates.append(os.path.join(BASE_DIR, "assets", f"{sku}.jpg"))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
     return None
+
+
+# file_id Telegram của banner đã gửi, chỉ trong bộ nhớ (key = đường dẫn + mtime, nên đổi ảnh thì tự upload lại).
+_banner_file_ids: dict[tuple[str, float], str] = {}
+
+
+def _banner_key(path: str) -> tuple[str, float]:
+    try:
+        return (path, os.path.getmtime(path))
+    except OSError:
+        return (path, 0.0)
 
 def get_stock_count(prod_id="gemini_plus"):
     import time
@@ -1413,24 +1433,41 @@ def render_product_intro(sku: str, stock: int, lang: str | None = None) -> str:
             f"{vip_em('lightning', '⚡️')} {t(lang, 'pick_continue')}")
 
 
-async def send_product_screen(query, sku: str, text: str, keyboard) -> None:
+async def send_product_screen(query, sku: str, text: str, keyboard, lang: str | None = None) -> None:
     """Hiện màn sản phẩm: ảnh banner nếu có. Caption ảnh tối đa 1024 ký tự: nếu giới thiệu dài hơn thì gửi ảnh với
     caption ngắn (tên sản phẩm) rồi gửi giới thiệu thành tin nhắn riêng kèm nút."""
     markup = InlineKeyboardMarkup(keyboard)
-    banner_path = get_product_banner_path(sku)
+    banner_path = get_product_banner_path(sku, lang)
     if banner_path and os.path.exists(banner_path) and query.message:
         try:
-            with open(banner_path, "rb") as f_img:
-                bio = io.BytesIO(f_img.read())
-            bio.name = f"{sku}.jpg"
+            key = _banner_key(banner_path)
+
+            async def send_banner(**kwargs):
+                """Gửi bằng file_id đã cache nếu có (không upload lại); lỗi file_id cũ -> upload lại từ file."""
+                cached = _banner_file_ids.get(key)
+                if cached:
+                    try:
+                        return await query.message.reply_photo(photo=cached, **kwargs)
+                    except Exception:
+                        _banner_file_ids.pop(key, None)
+                with open(banner_path, "rb") as f_img:
+                    bio = io.BytesIO(f_img.read())
+                bio.name = os.path.basename(banner_path)
+                sent = await query.message.reply_photo(photo=bio, **kwargs)
+                try:
+                    _banner_file_ids[key] = sent.photo[-1].file_id
+                except Exception:
+                    pass
+                return sent
+
             try:
                 await query.message.delete()
             except Exception:
                 pass
             if _plain_len(text) <= 1000:
-                await query.message.reply_photo(photo=bio, caption=text, reply_markup=markup, parse_mode="HTML")
+                await send_banner(caption=text, reply_markup=markup, parse_mode="HTML")
             else:
-                await query.message.reply_photo(photo=bio, caption=f"<b>{html.escape(sku_display_name(sku))}</b>", parse_mode="HTML")
+                await send_banner(caption=f"<b>{html.escape(sku_display_name(sku))}</b>", parse_mode="HTML")
                 await query.message.reply_text(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
             return
         except Exception as e_banner:
@@ -2119,7 +2156,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([vip_btn(t(lang, "btn_guide"), callback_data=f"gd:{sku}", emoji_name="book")])
         keyboard.append([vip_btn(t(lang, "btn_back_shop"), callback_data="shop", emoji_name="back")])
 
-        await send_product_screen(query, sku, render_product_intro(sku, stock, lang), keyboard)
+        await send_product_screen(query, sku, render_product_intro(sku, stock, lang), keyboard, lang)
 
     elif data.startswith("soldout_") and data[8:] in listed_skus():
         await query.answer(t(lang, "soldout_alert"), show_alert=True)
