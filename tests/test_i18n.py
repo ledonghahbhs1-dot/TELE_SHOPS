@@ -270,8 +270,8 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
     # ---------- menus ----------
     async def test_main_menu_in_both_languages_with_old_callback_data(self):
         expected = {
-            "vi": ["Mua hàng", "Đơn Hàng VIP Của Tôi", "CSKH Trực Tuyến 24/7", "Ngôn ngữ: Tiếng Việt"],
-            "en": ["Shop", "My VIP Orders", "24/7 Live Support", "Language: English"],
+            "vi": ["Mua hàng", "Đơn đã mua", "Hỗ trợ", "Ngôn ngữ: Tiếng Việt"],
+            "en": ["Shop", "My Orders", "Support", "Language: English"],
         }
         for lang, labels in expected.items():
             shop_bot.set_user_lang(555, lang)
