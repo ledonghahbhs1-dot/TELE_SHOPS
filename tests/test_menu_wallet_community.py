@@ -1,9 +1,6 @@
 import os
-import tempfile
 import unittest
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import shop_bot
 
@@ -69,34 +66,6 @@ class MenuTests(unittest.TestCase):
                 self.assertTrue(bool(cb) != bool(url))
                 if cb:
                     self.assertLessEqual(len(cb.encode()), 64)
-
-
-class WalletHandlerTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        settings = patch.multiple(shop_bot, DATA_DIR=self.directory.name,
-                                  DB_PATH=str(Path(self.directory.name) / "shop_database.db"),
-                                  CLAIMED_LINKS_FILE=str(Path(self.directory.name) / "claimed_links.txt"))
-        settings.start()
-        self.addCleanup(settings.stop)
-        with patch.dict(os.environ, {"USDT_WALLET": ""}):
-            shop_bot.init_database()
-
-    async def test_wallet_callback_shows_coming_soon_in_both_languages_and_no_balance(self):
-        for lang, phrase in (("vi", "đang được hoàn thiện"), ("en", "being finished")):
-            shop_bot.set_user_lang(777, lang)
-            message = SimpleNamespace(chat_id=1, message_id=2, photo=None, reply_photo=AsyncMock(), reply_text=AsyncMock(), delete=AsyncMock())
-            query = SimpleNamespace(data="wallet", answer=AsyncMock(), message=message)
-            update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=777, first_name="A"),
-                                     effective_chat=SimpleNamespace(id=1), message=None)
-            with patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render, \
-                 patch.object(shop_bot, "refresh_catalogue"):
-                await shop_bot.callback_handler(update, SimpleNamespace())
-            text = render.await_args.args[1]
-            self.assertIn(phrase, text)
-            datas = [b.callback_data for row in render.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
-            self.assertEqual(datas, ["main_menu"])
 
 
 if __name__ == "__main__":

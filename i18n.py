@@ -59,7 +59,91 @@ STRINGS: dict[str, dict[str, str]] = {
     "btn_support": {"vi": "Hỗ trợ", "en": "Support"},
     "btn_wallet": {"vi": "Ví của tôi", "en": "My Wallet"},
     "btn_community": {"vi": "Cộng đồng", "en": "Community"},
-    "wallet_coming_soon": {"vi": "<b>Tính năng ví đang được hoàn thiện.</b>\nVui lòng quay lại sau.", "en": "<b>The wallet feature is being finished.</b>\nPlease check back later."},
+    "btn_wallet_open_web": {
+        "vi": "Mở trang Profile",
+        "en": "Open Profile page",
+    },
+    "btn_wallet_enter_code": {
+        "vi": "Nhập mã liên kết",
+        "en": "Enter link code",
+    },
+    "btn_wallet_balance": {"vi": "Xem số dư", "en": "View balance"},
+    "btn_wallet_topup": {
+        "vi": "Nạp tiền",
+        "en": "Top up",
+    },
+    "btn_wallet_unlink": {
+        "vi": "Gỡ liên kết",
+        "en": "Unlink",
+    },
+    "btn_wallet_unlink_yes": {
+        "vi": "Xác nhận gỡ",
+        "en": "Confirm unlink",
+    },
+    "btn_wallet_cancel": {
+        "vi": "Huỷ",
+        "en": "Cancel",
+    },
+    "wallet_guide": {
+        "vi": "<b>Ví của tôi</b>\n\nLiên kết Telegram với tài khoản WolfMod để xem số dư ngay trong bot.\n\n1) Mở trang Profile trên web và đăng nhập.\n2) Bấm “Liên kết Telegram” để lấy mã (hiệu lực 10 phút).\n3) Quay lại đây, bấm “Nhập mã liên kết” và gửi mã.\n\n⚠️ <i>Chỉ gửi mã cho bot này, KHÔNG gửi cho ai khác.</i>",
+        "en": "<b>My Wallet</b>\n\nLink Telegram to your WolfMod account to see your balance right in the bot.\n\n1) Open the Profile page on the web and sign in.\n2) Tap “Link Telegram” to get a code (valid for 10 minutes).\n3) Come back here, tap “Enter link code” and send the code.\n\n⚠️ <i>Send the code only to this bot, NEVER to anyone else.</i>",
+    },
+    "wallet_balance": {
+        "vi": "<b>Ví của tôi</b>\n\nTài khoản: <b>{name}</b>\nSố dư: <b>{balance}</b>\n\n<i>Nạp tiền trên trang Profile (tab Top Up) của web.</i>",
+        "en": "<b>My Wallet</b>\n\nAccount: <b>{name}</b>\nBalance: <b>{balance}</b>\n\n<i>Top up on the web Profile page (Top Up tab).</i>",
+    },
+    "wallet_prompt_code": {
+        "vi": "Gửi mã liên kết 8 ký tự (chữ và số) bạn lấy trên web.\n⚠️ <i>Chỉ gửi mã trong chat riêng này. Tin nhắn chứa mã sẽ được xoá sau khi xử lý.</i>",
+        "en": "Send the 8-character link code (letters and digits) you got on the web.\n⚠️ <i>Send it only in this private chat. The message with the code will be deleted after it is processed.</i>",
+    },
+    "wallet_code_bad_format": {
+        "vi": "Mã gồm đúng 8 ký tự chữ và số. Vui lòng gửi lại.",
+        "en": "The code is exactly 8 letters and digits. Please send it again.",
+    },
+    "wallet_code_stopped": {
+        "vi": "Đã dừng nhận mã. Bấm “Nhập mã liên kết” khi bạn có mã.",
+        "en": "Stopped waiting for a code. Tap “Enter link code” when you have one.",
+    },
+    "wallet_code_invalid": {
+        "vi": "Mã sai hoặc đã hết hạn. Hãy lấy mã mới trên web rồi gửi lại.",
+        "en": "The code is wrong or has expired. Get a new code on the web and send it again.",
+    },
+    "wallet_err_telegram_linked": {
+        "vi": "Telegram này đã được liên kết với một tài khoản. Hãy gỡ liên kết cũ trước (mục Ví của tôi).",
+        "en": "This Telegram is already linked to an account. Unlink it first (My Wallet).",
+    },
+    "wallet_err_account_linked": {
+        "vi": "Tài khoản web này đã liên kết với một Telegram khác. Hãy gỡ liên kết trên web trước.",
+        "en": "This web account is already linked to another Telegram. Unlink it on the web first.",
+    },
+    "wallet_err_too_many": {
+        "vi": "Bạn đã thử quá nhiều lần. Vui lòng thử lại sau khoảng {minutes} phút.",
+        "en": "Too many attempts. Please try again in about {minutes} minutes.",
+    },
+    "wallet_err_unavailable": {
+        "vi": "Tính năng ví chưa mở hoặc đang tạm thời không dùng được. Vui lòng thử lại sau.",
+        "en": "The wallet is not open yet or is temporarily unavailable. Please try again later.",
+    },
+    "wallet_linked_ok": {
+        "vi": "✅ Đã liên kết Telegram với tài khoản <b>{name}</b>.",
+        "en": "✅ Telegram is now linked to account <b>{name}</b>.",
+    },
+    "wallet_unlink_ask": {
+        "vi": "Gỡ liên kết Telegram khỏi tài khoản <b>{name}</b>?",
+        "en": "Unlink Telegram from account <b>{name}</b>?",
+    },
+    "wallet_unlinked_ok": {
+        "vi": "Đã gỡ liên kết Telegram khỏi tài khoản <b>{name}</b>.",
+        "en": "Telegram has been unlinked from account <b>{name}</b>.",
+    },
+    "wallet_not_linked": {
+        "vi": "Telegram này chưa liên kết với tài khoản nào.",
+        "en": "This Telegram is not linked to any account.",
+    },
+    "wallet_private_only": {
+        "vi": "Vui lòng dùng tính năng này trong chat riêng với bot.",
+        "en": "Please use this feature in a private chat with the bot.",
+    },
     "btn_language": {"vi": "Ngôn ngữ: Tiếng Việt", "en": "Language: English"},
     "btn_back_menu": {"vi": "Trở Về Sảnh VIP", "en": "Back to VIP Lobby"},
     "btn_back_shop": {"vi": "Về Danh Sách Sản Phẩm", "en": "Back to Products"},

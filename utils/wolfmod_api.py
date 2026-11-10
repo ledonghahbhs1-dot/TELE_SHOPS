@@ -11,10 +11,16 @@ import aiohttp
 from yarl import URL
 
 
+# Only these signed server routes may be called (the shop bot's own API and the read-only wallet link routes).
+SIGNED_PREFIXES = ("/api/bot/", "/api/tg/wallet/")
+SIGNED_EXACT = ("/api/tg/wallet",)
+
+
 class WolfmodError(Exception):
-    def __init__(self, status: int, code: str = "backend_unavailable"):
+    def __init__(self, status: int, code: str = "backend_unavailable", body: dict | None = None):
         self.status = status
         self.code = code
+        self.body = body if isinstance(body, dict) else {}
         super().__init__(f"Wolfmod API error ({status})")
 
 
@@ -40,7 +46,7 @@ class WolfmodAPI:
             await self.session.close()
 
     async def request(self, method: str, path: str, body=None, params=None):
-        if not path.startswith("/api/bot/") or "?" in path or "#" in path:
+        if not (path in SIGNED_EXACT or path.startswith(SIGNED_PREFIXES)) or "?" in path or "#" in path:
             raise ValueError("Only signed bot routes are supported")
         if not self.session:
             raise RuntimeError("Use WolfmodAPI as an async context manager")
@@ -72,7 +78,7 @@ class WolfmodAPI:
                             await asyncio.sleep(0.5)
                             continue
                         code = data.get("error", "backend_unavailable") if isinstance(data, dict) else "backend_unavailable"
-                        raise WolfmodError(response.status, str(code))
+                        raise WolfmodError(response.status, str(code), data if isinstance(data, dict) else None)
                     if not isinstance(data, dict):
                         raise WolfmodError(502)
                     return data
