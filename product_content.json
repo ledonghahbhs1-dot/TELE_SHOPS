@@ -97,7 +97,7 @@
   "chatgpt_go_3m": {
     "needs_owner_approval": false,
     "price_vnd_fallback": 100000,
-    "source": "Thông tin do Goof cung cấp (task 046 follow-up): giao bằng offer link; 4 lợi ích như bên dưới. Chưa có chính sách bảo hành.",
+    "source": "Thông tin do Goof cung cấp (task 046 follow-up): giao bằng offer link; 4 lợi ích như bên dưới. Bảo hành 1 đổi 1 (chủ shop chốt).",
     "name": {
       "vi": "CHATGPT GO 3 THÁNG",
       "en": "ChatGPT Go – 3 Months"
@@ -128,16 +128,18 @@
       "vi": "Mỗi đơn nhận 1 offer link (link ưu đãi) từ kho, bot gửi tự động sau khi thanh toán được xác nhận. Mở link, đăng nhập tài khoản ChatGPT của bạn và làm theo màn hình kích hoạt. Link chỉ dùng được một lần.",
       "en": "Each order gets 1 offer link from stock, sent automatically by the bot once payment is confirmed. Open the link, sign in to your ChatGPT account and follow the activation screen. The link works only once."
     },
-    "warranty": null,
+    "warranty": {
+      "vi": "Bảo hành 1 đổi 1, liên hệ CSKH nếu lỗi.",
+      "en": "1-for-1 replacement warranty, contact support if faulty."
+    },
     "notes": {
       "vi": [
-        "Liên hệ CSKH nếu link lỗi (kèm mã đơn hàng)."
+        "Khi liên hệ CSKH, vui lòng kèm mã đơn hàng."
       ],
       "en": [
-        "Contact support if the link fails (include your order ID)."
+        "Please include your order ID when contacting support."
       ]
     },
-    "owner_todo": "Goof chưa cung cấp chính sách bảo hành: trang chỉ ghi 'Liên hệ CSKH nếu link lỗi'. Điền 'warranty' khi có.",
     "usd_from_rate": true,
     "delivery_kind": "offer_link"
   },

@@ -95,7 +95,7 @@ GUIDES: dict[str, dict[str, dict]] = {
             "notes_title": "Lưu ý:",
             "notes": [
                 ("shield", "✦", "Link chỉ dùng được một lần, đừng chia sẻ cho người khác."),
-                ("chat", "✦", "Link lỗi: liên hệ CSKH kèm mã đơn hàng."),
+                ("chat", "✦", "Bảo hành 1 đổi 1, liên hệ CSKH nếu lỗi (kèm mã đơn hàng)."),
             ],
         },
         "en": {
@@ -109,7 +109,7 @@ GUIDES: dict[str, dict[str, dict]] = {
             "notes_title": "Notes:",
             "notes": [
                 ("shield", "✦", "The link works only once, do not share it."),
-                ("chat", "✦", "If the link fails: contact support with your order ID."),
+                ("chat", "✦", "1-for-1 replacement warranty, contact support if faulty (include your order ID)."),
             ],
         },
     },

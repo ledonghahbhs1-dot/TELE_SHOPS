@@ -151,6 +151,8 @@ class OfferDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Your offer link (1)", en)
         self.assertIn("Sign in to your ChatGPT account", en)
         self.assertIn("works only once", en)
+        self.assertIn("Bảo hành 1 đổi 1", vi)
+        self.assertIn("1-for-1 replacement warranty", en)
         self.assertEqual(buttons[0][0].url, "https://chatgpt.com/offer/AAA")
         # a non-URL payload never produces a url button (Telegram would reject it)
         _, odd = shop_bot.format_delivered_links_message("TGS2", ["not a url"], GPT, "en")

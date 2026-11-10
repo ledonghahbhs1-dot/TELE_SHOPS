@@ -133,8 +133,8 @@ class CatalogueTests(unittest.TestCase):
         gpt = product_content.get(GPT)
         self.assertFalse(gpt["needs_owner_approval"])      # content now supplied by Goof
         self.assertEqual(gpt["delivery_kind"], "offer_link")
-        self.assertIsNone(gpt["warranty"])                  # no warranty policy supplied: nothing invented
-        self.assertIn("Liên hệ CSKH nếu link lỗi", gpt["notes"]["vi"][0])
+        self.assertEqual(gpt["warranty"]["vi"], "Bảo hành 1 đổi 1, liên hệ CSKH nếu lỗi.")
+        self.assertEqual(gpt["warranty"]["en"], "1-for-1 replacement warranty, contact support if faulty.")
         self.assertEqual(len(gpt["features"]["vi"]), 4)
         self.assertEqual(len(gpt["features"]["en"]), 4)
         self.assertIn("GPT-5", gpt["features"]["en"][1])
