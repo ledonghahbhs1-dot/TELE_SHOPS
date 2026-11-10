@@ -1475,15 +1475,36 @@ async def send_product_screen(query, sku: str, text: str, keyboard, lang: str | 
     await safe_edit_or_reply(query, text, reply_markup=markup, parse_mode="HTML")
 
 
+def wallet_enabled() -> bool:
+    """Nút "Ví của tôi" chỉ hiện khi WALLET_ENABLED=1 (mặc định TẮT)."""
+    return os.getenv("WALLET_ENABLED", "0").strip() == "1"
+
+
+def community_url() -> str | None:
+    """Link cộng đồng từ COMMUNITY_URL; chỉ nhận https://t.me/... (không khoảng trắng), ngược lại ẩn nút."""
+    url = os.getenv("COMMUNITY_URL", "").strip()
+    prefix = "https://t.me/"
+    if url.startswith(prefix) and len(url) > len(prefix) and not any(ch.isspace() for ch in url):
+        return url
+    return None
+
+
 def main_menu_keyboard(user_id=None, lang: str | None = None):
-    """Menu chính gọn: Mua hàng (gom mọi sản phẩm), Đơn hàng, CSKH, Ngôn ngữ."""
+    """Menu chính: [Mua hàng | Ví của tôi*] / [Đơn đã mua | Hỗ trợ] / [Cộng đồng*] / [Ngôn ngữ] (* chỉ hiện khi bật)."""
     lang = lang or get_user_lang(user_id)
-    return InlineKeyboardMarkup([
-        [vip_btn(t(lang, "btn_shop"), callback_data="shop", emoji_name="crown", style="primary")],
-        [vip_btn(t(lang, "btn_orders"), callback_data="my_orders", emoji_name="diamond")],
-        [vip_btn(t(lang, "btn_support"), callback_data="support", emoji_name="chat")],
-        [vip_btn(t(lang, "btn_language"), callback_data="lang_menu", emoji_name="globe")],
-    ])
+    row1 = [vip_btn(t(lang, "btn_shop"), callback_data="shop", emoji_name="crown", style="primary")]
+    if wallet_enabled():
+        row1.append(vip_btn(t(lang, "btn_wallet"), callback_data="wallet", emoji_name="wallet"))
+    rows = [
+        row1,
+        [vip_btn(t(lang, "btn_orders"), callback_data="my_orders", emoji_name="diamond"),
+         vip_btn(t(lang, "btn_support"), callback_data="support", emoji_name="chat")],
+    ]
+    community = community_url()
+    if community:
+        rows.append([vip_btn(t(lang, "btn_community"), url=community, emoji_name="user")])
+    rows.append([vip_btn(t(lang, "btn_language"), callback_data="lang_menu", emoji_name="globe")])
+    return InlineKeyboardMarkup(rows)
 
 
 def shop_message(lang: str) -> str:
@@ -2580,6 +2601,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [vip_btn(t(lang, "btn_my_orders"), callback_data="my_orders", emoji_name="diamond")],
                 [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
+
+    elif data == "wallet":
+        # Khung nút: tính năng ví (liên kết tài khoản web) chưa có; không bao giờ hiện số dư ở đây.
+        await safe_edit_or_reply(
+            query,
+            t(lang, "wallet_coming_soon"),
+            reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]]),
+            parse_mode="HTML",
+        )
 
     elif data == "support":
         contact = get_setting("support_contact", "@wolfmodyt")

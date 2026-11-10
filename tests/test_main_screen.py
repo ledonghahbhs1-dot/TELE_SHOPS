@@ -137,7 +137,7 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
             shop = shop_bot.shop_keyboard(1)
         # The main menu is now compact: the products live under "Mua hàng" (shop).
         self.assertEqual(datas(markup), ["shop", "my_orders", "support", "lang_menu"])
-        self.assertEqual(texts(markup), ["Mua hàng", "Đơn Hàng VIP Của Tôi", "CSKH Trực Tuyến 24/7", "Ngôn ngữ: Tiếng Việt"])
+        self.assertEqual(texts(markup), ["Mua hàng", "Đơn đã mua", "Hỗ trợ", "Ngôn ngữ: Tiếng Việt"])
         self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"soldout_{GPT}", "main_menu"])
         labels = texts(shop)
         self.assertEqual(labels[0], "MUA GOOGLE AI PLUS 12 THÁNG • %s VNĐ (Kho: 294)" % f"{shop_bot.get_product(PLUS)['price']:,}")
