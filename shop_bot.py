@@ -1998,6 +1998,162 @@ async def handle_binance_id_message(update, context) -> bool:
     return True
 
 
+# ── "Ví của tôi": liên kết Telegram với tài khoản web, CHỈ XEM SỐ DƯ (không trả bằng số dư) ─────────────────────────
+# Web: /api/tg/wallet[/link|/unlink] (cờ TG_WALLET_ENABLED phía web). Gọi bằng chữ ký HMAC của utils/wolfmod_api.py với
+# WOLFMOD_API_SECRET (= TG_BOT_API_SECRET trên Vercel). Không log mã liên kết, số dư hay chữ ký; không cache số dư.
+WALLET_PROFILE_URL = "https://www.wolfmod.xyz/profile"
+WALLET_CODE_WAIT_SECONDS = 10 * 60
+WALLET_MAX_BAD_INPUTS = 5
+_WALLET_CODE_RE = re.compile(r"[A-Za-z0-9]{8}")
+AWAITING_WALLET_CODE: dict = {}   # user_id -> {"until": float, "bad": int}
+
+
+async def wallet_request(method: str, path: str, body=None, params=None) -> tuple[int, dict]:
+    """Gọi route ví đã ký. Trả (status, body); lỗi mạng/thiếu cấu hình -> (503, {"error": "unavailable"})."""
+    from utils.wolfmod_api import WolfmodAPI, WolfmodError
+    secret = os.getenv("WOLFMOD_API_SECRET", "").strip()
+    if len(secret) < 32:
+        return 503, {"error": "unavailable"}
+    base = os.getenv("WOLFMOD_API_URL", "https://www.wolfmod.xyz").strip() or "https://www.wolfmod.xyz"
+    try:
+        async with WolfmodAPI(base, secret) as api:
+            return 200, await api.request(method, path, body=body, params=params)
+    except WolfmodError as error:
+        return error.status, error.body if error.body else {"error": error.code}
+    except Exception as error:
+        logger.warning("Ví: lỗi gọi web: %s", type(error).__name__)
+        return 503, {"error": "unavailable"}
+
+
+def _wallet_back(lang):
+    return [vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]
+
+
+async def render_wallet_screen(user_id: int, lang: str):
+    """(text, markup) của màn Ví: chưa liên kết -> hướng dẫn; đã liên kết -> số dư (đọc từ web mỗi lần)."""
+    status, body = await wallet_request("GET", "/api/tg/wallet", params={"tg_user_id": user_id})
+    unavailable = (f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}", InlineKeyboardMarkup([_wallet_back(lang)]))
+    if status != 200 or not isinstance(body.get("linked"), bool):
+        return unavailable
+    if body["linked"]:
+        balance = body.get("balance_vnd")
+        if isinstance(balance, bool) or not isinstance(balance, int) or balance < 0:
+            return unavailable
+        text = t(lang, "wallet_balance", name=html.escape(str(body.get("display_name_masked") or "***")), balance=i18n.fmt_vnd(balance))
+        return text, InlineKeyboardMarkup([
+            [vip_btn(t(lang, "btn_wallet_topup"), url=WALLET_PROFILE_URL, emoji_name="money")],
+            [vip_btn(t(lang, "btn_wallet_unlink"), callback_data="wallet_unlink", emoji_name="cross")],
+            _wallet_back(lang),
+        ])
+    return t(lang, "wallet_guide"), InlineKeyboardMarkup([
+        [vip_btn(t(lang, "btn_wallet_open_web"), url=WALLET_PROFILE_URL, emoji_name="globe")],
+        [vip_btn(t(lang, "btn_wallet_enter_code"), callback_data="wallet_code", emoji_name="key", style="primary")],
+        _wallet_back(lang),
+    ])
+
+
+def _is_private_chat(message) -> bool:
+    chat = getattr(message, "chat", None)
+    return getattr(chat, "type", None) == "private"
+
+
+async def handle_wallet_callback(query, user, data: str, lang: str) -> None:
+    if not wallet_enabled():
+        await safe_edit_or_reply(query, f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}",
+                                 reply_markup=InlineKeyboardMarkup([_wallet_back(lang)]), parse_mode="HTML")
+        return
+    if not _is_private_chat(query.message):
+        await query.answer(t(lang, "wallet_private_only"), show_alert=True)
+        return
+    if data == "wallet":
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        text, markup = await render_wallet_screen(user.id, lang)
+        await safe_edit_or_reply(query, text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
+    elif data == "wallet_code":
+        import time
+        AWAITING_WALLET_CODE[user.id] = {"until": time.monotonic() + WALLET_CODE_WAIT_SECONDS, "bad": 0}
+        await query.message.reply_text(t(lang, "wallet_prompt_code"), parse_mode="HTML")
+    elif data == "wallet_unlink":
+        status, body = await wallet_request("GET", "/api/tg/wallet", params={"tg_user_id": user.id})
+        if status == 200 and body.get("linked") is True:
+            text = t(lang, "wallet_unlink_ask", name=html.escape(str(body.get("display_name_masked") or "***")))
+            markup = InlineKeyboardMarkup([[
+                vip_btn(t(lang, "btn_wallet_unlink_yes"), callback_data="wallet_unlink_yes", emoji_name="cross", style="primary"),
+                vip_btn(t(lang, "btn_wallet_cancel"), callback_data="wallet", emoji_name="back"),
+            ]])
+        else:
+            text, markup = await render_wallet_screen(user.id, lang)
+        await safe_edit_or_reply(query, text, reply_markup=markup, parse_mode="HTML")
+    elif data == "wallet_unlink_yes":
+        status, body = await wallet_request("POST", "/api/tg/wallet/unlink", body={"tg_user_id": user.id})
+        if status == 200:
+            text = f"{vip_em('check', '✅')} " + t(lang, "wallet_unlinked_ok", name=html.escape(str(body.get("display_name_masked") or "***")))
+        elif status == 404:
+            text = f"{vip_em('shield', '🛡')} " + t(lang, "wallet_not_linked")
+        else:
+            text = f"{vip_em('shield', '🛡')} " + t(lang, "wallet_err_unavailable")
+        await safe_edit_or_reply(query, text, reply_markup=InlineKeyboardMarkup([_wallet_back(lang)]), parse_mode="HTML")
+
+
+async def _delete_quietly(message) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass   # best-effort: a failed delete never breaks the flow
+
+
+async def handle_wallet_code_message(update, context) -> bool:
+    """True nếu tin nhắn được xử lý như mã liên kết ví. Chỉ chat riêng; sai định dạng thì KHÔNG gọi web."""
+    import time
+    user = update.effective_user
+    waiting = AWAITING_WALLET_CODE.get(user.id)
+    if not waiting or not _is_private_chat(update.message):
+        return False
+    if time.monotonic() > waiting["until"]:
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        return False
+    lang = get_user_lang(user.id)
+    text = re.sub(r"[\s-]", "", (update.message.text or ""))
+    if not _WALLET_CODE_RE.fullmatch(text):
+        waiting["bad"] += 1
+        if waiting["bad"] >= WALLET_MAX_BAD_INPUTS:
+            AWAITING_WALLET_CODE.pop(user.id, None)
+            await update.message.reply_text(t(lang, "wallet_code_stopped"), parse_mode="HTML")
+        else:
+            await update.message.reply_text(t(lang, "wallet_code_bad_format"), parse_mode="HTML")
+        return True
+    payload = {"tg_user_id": user.id, "code": text.upper()}
+    if user.username:
+        payload["tg_username"] = user.username
+    status, body = await wallet_request("POST", "/api/tg/wallet/link", body=payload)
+    await _delete_quietly(update.message)   # the code is single-use, but do not leave it in the chat
+    error = body.get("error") if isinstance(body.get("error"), str) else ""
+    if status == 200 and body.get("linked") is True:
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        name = html.escape(str(body.get("display_name_masked") or "***"))
+        await update.effective_chat.send_message(
+            f"{vip_em('check', '✅')} {t(lang, 'wallet_linked_ok', name=name)}", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_wallet_balance"), callback_data="wallet", emoji_name="wallet")]]))
+        return True
+    if error in ("invalid_or_expired_code", "invalid_input"):
+        reply = t(lang, "wallet_code_invalid")
+    elif error == "telegram_already_linked":
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        reply = t(lang, "wallet_err_telegram_linked")
+    elif error == "account_already_linked":
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        reply = t(lang, "wallet_err_account_linked")
+    elif status == 429 or error in ("too_many_attempts", "too_many_requests"):
+        AWAITING_WALLET_CODE.pop(user.id, None)
+        retry = body.get("retry_after")
+        minutes = max(1, -(-int(retry) // 60)) if isinstance(retry, int) and not isinstance(retry, bool) and retry > 0 else 60
+        reply = t(lang, "wallet_err_too_many", minutes=minutes)
+    else:
+        reply = t(lang, "wallet_err_unavailable")
+    await update.effective_chat.send_message(f"{vip_em('shield', '🛡')} {reply}", parse_mode="HTML")
+    return True
+
+
 async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU):
     import hashlib
     if not 1 <= qty <= 50 or sku not in known_skus() or (sku != DEFAULT_SKU and qty > sku_max_qty(sku)):
@@ -2602,14 +2758,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
 
-    elif data == "wallet":
-        # Khung nút: tính năng ví (liên kết tài khoản web) chưa có; không bao giờ hiện số dư ở đây.
-        await safe_edit_or_reply(
-            query,
-            t(lang, "wallet_coming_soon"),
-            reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]]),
-            parse_mode="HTML",
-        )
+    elif data in ("wallet", "wallet_code", "wallet_unlink", "wallet_unlink_yes"):
+        await handle_wallet_callback(query, user, data, lang)
 
     elif data == "support":
         contact = get_setting("support_contact", "@wolfmodyt")
@@ -3059,6 +3209,10 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
 
     # Bỏ qua nếu là lệnh bắt đầu bằng / hoặc .
     if raw_text.startswith(("/", ".")):
+        return
+
+    # Đang chờ mã liên kết ví (chỉ khi tính năng bật, chỉ chat riêng)
+    if wallet_enabled() and user_id in AWAITING_WALLET_CODE and await handle_wallet_code_message(update, context):
         return
 
     # Đang chờ ID lệnh Binance Pay của khách (chỉ khi tính năng bật)
