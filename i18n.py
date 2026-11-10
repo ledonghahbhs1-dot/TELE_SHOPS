@@ -290,6 +290,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "vi": "<b>Hệ thống chưa nhận được thanh toán cho đơn hàng này.</b>",
         "en": "<b>The system has not received a payment for this order yet.</b>",
     },
+    "bep20_confirming": {
+        "vi": "<b>Đã thấy giao dịch trên mạng, đang chờ xác nhận ({n}/{need}). Vui lòng bấm kiểm tra lại sau ít phút.</b>",
+        "en": "<b>The transaction is visible on the network and awaiting confirmations ({n}/{need}). Please check again in a few minutes.</b>",
+    },
     "check_unknown": {
         "vi": "<b>Hiện chưa kiểm tra được trạng thái thanh toán.</b>",
         "en": "<b>The payment status cannot be checked right now.</b>",
