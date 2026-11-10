@@ -1183,10 +1183,10 @@ async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
     ]
     if binance_pay_enabled():
         # Tùy chọn thêm (mặc định TẮT): USDT qua Binance Pay, khách trả đúng giá rồi dán ID lệnh.
-        keyboard.insert(2, [vip_btn(" USDT — Binance Pay (dán ID lệnh)", callback_data=cb_qty("binance", sku, qty), emoji_name="usdt")])
+        keyboard.insert(2, [vip_btn(t(lang, "btn_pay_binance"), callback_data=cb_qty("binance", sku, qty), emoji_name="usdt")])
     if bep20_enabled():
         # Tùy chọn thêm (mặc định TẮT): USDT BEP20 qua QR địa chỉ ví. Số tiền chính xác (có hậu tố duy nhất) hiện ở hóa đơn.
-        keyboard.insert(2, [vip_btn(" USDT BEP20 — Quét QR ví", callback_data=cb_qty("bep20", sku, qty), emoji_name="usdt")])
+        keyboard.insert(2, [vip_btn(t(lang, "btn_pay_bep20"), callback_data=cb_qty("bep20", sku, qty), emoji_name="usdt")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     if hasattr(target, "edit_message_text"):
@@ -1698,28 +1698,23 @@ def check_web_bep20(order_id: str, user_id: int) -> dict:
     return result
 
 
-def render_bep20_invoice(order_id: str, info: dict, qty: int, sku: str) -> str:
-    return (
-        f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>HÓA ĐƠN USDT BEP20</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
-        f"{vip_em('tag')} <b>Mã đơn:</b> <code>{html.escape(order_id)}</code>\n"
-        f"{vip_em('box')} <b>Sản phẩm:</b> {html.escape(sku_display_name(sku))} × {qty}\n"
-        f"{vip_em('globe')} <b>Mạng:</b> BNB Smart Chain (BEP20) — token <b>USDT</b>\n"
-        f"{vip_em('money')} <b>Số tiền CHÍNH XÁC:</b> <code>{info['amount_usdt']}</code> USDT\n"
-        f"{vip_em('card')} <b>Địa chỉ ví nhận:</b>\n<code>{info['address']}</code>\n"
-        f"{vip_em('calendar')} <b>Hạn thanh toán:</b> <code>{info['expires_at']:%H:%M:%S}</code>\n\n"
-        f"{vip_em('shield', '⚠️')} <i>Chỉ chuyển USDT trên mạng BEP20 (BSC), đúng từng chữ số ở trên (không làm tròn). "
-        f"Chuyển sai mạng, sai token hoặc sai số tiền sẽ không được xác nhận tự động và có thể mất tiền.</i>\n"
-        f"{vip_em('lightning', '⚡️')} <i>Sau khi chuyển, bấm “Tôi đã thanh toán — kiểm tra”. Cần khoảng {info['min_confirmations']} xác nhận mạng.</i>"
-    )
+def render_bep20_invoice(order_id: str, info: dict, qty: int, sku: str, lang: str | None = None) -> str:
+    lang = i18n.normalize_lang(lang or get_default_lang())
+    return t(lang, "bep20_invoice", crown=vip_em('crown'), diamond=vip_em('diamond'), tag=vip_em('tag'), box=vip_em('box'),
+             globe=vip_em('globe'), money=vip_em('money'), card=vip_em('card'), calendar=vip_em('calendar'),
+             shield=vip_em('shield', '⚠️'), lightning=vip_em('lightning', '⚡️'),
+             order=html.escape(order_id), product=html.escape(sku_display_name(sku)), qty=qty, amount=info['amount_usdt'],
+             address=info['address'], deadline=f"{info['expires_at']:%H:%M:%S}", confirmations=info['min_confirmations'])
 
 
 async def show_bep20_checkout(query, user, qty, sku=DEFAULT_SKU):
     import hashlib
+    lang = get_user_lang(user.id)
     if not bep20_enabled():
-        await query.answer("Phương thức này chưa được bật.", show_alert=True)
+        await query.answer(t(lang, "pay_method_disabled"), show_alert=True)
         return
     if not 1 <= qty <= 50 or sku not in known_skus() or (sku != DEFAULT_SKU and qty > sku_max_qty(sku)):
-        await query.answer("Số lượng không hợp lệ.", show_alert=True)
+        await query.answer(t(lang, "pay_invalid_qty"), show_alert=True)
         return
     # Cùng một tin nhắn + số lượng + sản phẩm -> cùng mã đơn (bấm lặp không tạo hóa đơn mới). Có hậu tố riêng cho BEP20.
     reference = f"{user.id}:{query.message.chat_id}:{query.message.message_id}:{qty}:bep20"
@@ -1727,19 +1722,19 @@ async def show_bep20_checkout(query, user, qty, sku=DEFAULT_SKU):
         reference += f":{sku}"
     order_id = "TGS" + hashlib.sha256(reference.encode()).hexdigest()[:12].upper()
     back = InlineKeyboardMarkup([
-        [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
-        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+        [vip_btn(t(lang, "btn_reselect_method"), callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
     ])
     try:
         info = await asyncio.to_thread(create_web_bep20_order, order_id, user, qty, sku)
     except Bep20Unavailable as error:
         messages = {
-            "out_of_stock": "Sản phẩm hiện đã hết hàng.",
-            "product_unavailable": "Sản phẩm này chưa hỗ trợ thanh toán USDT BEP20 hoặc không đủ số lượng cho phép.",
-            "busy_try_again": "Hệ thống đang bận, vui lòng thử lại sau ít phút.",
-            "too_many_pending_orders": "Bạn đang có quá nhiều đơn chờ thanh toán. Vui lòng hoàn tất hoặc hủy bớt đơn cũ.",
+            "out_of_stock": "pay_err_out_of_stock",
+            "product_unavailable": "bep20_err_product_unavailable",
+            "busy_try_again": "pay_err_busy",
+            "too_many_pending_orders": "pay_err_too_many_pending",
         }
-        await safe_edit_or_reply(query, f"{vip_em('shield')} <b>{messages.get(error.code, 'Chưa thể tạo hóa đơn USDT BEP20. Vui lòng thử lại sau hoặc chọn phương thức khác.')}</b>",
+        await safe_edit_or_reply(query, f"{vip_em('shield')} <b>{t(lang, messages.get(error.code, 'bep20_err_generic'))}</b>",
                                  reply_markup=back, parse_mode="HTML")
         return
     conn = get_db_connection()
@@ -1753,10 +1748,10 @@ async def show_bep20_checkout(query, user, qty, sku=DEFAULT_SKU):
         conn.commit()
     finally:
         conn.close()
-    text = render_bep20_invoice(order_id, info, qty, sku)
+    text = render_bep20_invoice(order_id, info, qty, sku, lang)
     markup = InlineKeyboardMarkup([
-        [vip_btn("TÔI ĐÃ THANH TOÁN — KIỂM TRA", callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
-        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+        [vip_btn(t(lang, "btn_bep20_check"), callback_data=f"confirm_pay_{order_id}", emoji_name="check", style="primary")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
     ])
     qr_bytes = generate_crypto_qr_png_bytes(info["address"])  # QR của địa chỉ ví thuần (0x...), sinh cục bộ, không gọi dịch vụ ngoài
     if qr_bytes and query.message:
@@ -1853,46 +1848,42 @@ def confirm_web_binance(order_id: str, user_id: int, pasted_id: str) -> dict:
     return {"result": "unavailable"}
 
 
-def render_binance_invoice(order_id: str, info: dict, qty: int, sku: str) -> str:
-    return (
-        f"{vip_em('crown')} ═══════ {vip_em('diamond')} <b>HÓA ĐƠN USDT — BINANCE PAY</b> {vip_em('diamond')} ═══════ {vip_em('crown')}\n\n"
-        f"{vip_em('tag')} <b>Mã đơn:</b> <code>{html.escape(order_id)}</code>\n"
-        f"{vip_em('box')} <b>Sản phẩm:</b> {html.escape(sku_display_name(sku))} × {qty}\n"
-        f"{vip_em('money')} <b>Số tiền:</b> <code>{info['amount_usdt']}</code> USDT\n"
-        f"{vip_em('card')} <b>Binance Pay ID nhận:</b> <code>{info['receiver_id']}</code>\n"
-        f"{vip_em('calendar')} <b>Hạn thanh toán:</b> <code>{info['expires_at']:%H:%M:%S}</code>\n\n"
-        f"{vip_em('shield', '⚠️')} <i>Mở Binance → Pay → Gửi, nhập Binance Pay ID ở trên và chuyển ĐÚNG số tiền trên bằng USDT. "
-        f"Sai số tiền hoặc sai loại tiền sẽ không được xác nhận tự động.</i>\n"
-        f"{vip_em('lightning', '⚡️')} <i>Sau khi chuyển, GIỮ LẠI “ID lệnh” (Order ID) trong chi tiết giao dịch, bấm nút bên dưới rồi dán ID lệnh vào đây.</i>"
-    )
+def render_binance_invoice(order_id: str, info: dict, qty: int, sku: str, lang: str | None = None) -> str:
+    lang = i18n.normalize_lang(lang or get_default_lang())
+    return t(lang, "binance_invoice", crown=vip_em('crown'), diamond=vip_em('diamond'), tag=vip_em('tag'), box=vip_em('box'),
+             money=vip_em('money'), card=vip_em('card'), calendar=vip_em('calendar'),
+             shield=vip_em('shield', '⚠️'), lightning=vip_em('lightning', '⚡️'),
+             order=html.escape(order_id), product=html.escape(sku_display_name(sku)), qty=qty, amount=info['amount_usdt'],
+             receiver=info['receiver_id'], deadline=f"{info['expires_at']:%H:%M:%S}")
 
 
 async def show_binance_checkout(query, user, qty, sku=DEFAULT_SKU):
     import hashlib
+    lang = get_user_lang(user.id)
     if not binance_pay_enabled():
-        await query.answer("Phương thức này chưa được bật.", show_alert=True)
+        await query.answer(t(lang, "pay_method_disabled"), show_alert=True)
         return
     if not 1 <= qty <= 50 or sku not in known_skus() or (sku != DEFAULT_SKU and qty > sku_max_qty(sku)):
-        await query.answer("Số lượng không hợp lệ.", show_alert=True)
+        await query.answer(t(lang, "pay_invalid_qty"), show_alert=True)
         return
     reference = f"{user.id}:{query.message.chat_id}:{query.message.message_id}:{qty}:binance"
     if sku != DEFAULT_SKU:
         reference += f":{sku}"
     order_id = "TGS" + hashlib.sha256(reference.encode()).hexdigest()[:12].upper()
     back = InlineKeyboardMarkup([
-        [vip_btn("Chọn Lại Phương Thức Thanh Toán", callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
-        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+        [vip_btn(t(lang, "btn_reselect_method"), callback_data=cb_qty("select", sku, qty), emoji_name="refresh")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
     ])
     await asyncio.to_thread(sync_web_product_price, sku)
     try:
         info = await asyncio.to_thread(create_web_binance_order, order_id, user, qty, sku)
     except BinancePayUnavailable as error:
         messages = {
-            "out_of_stock": "Sản phẩm hiện đã hết hàng.",
-            "product_unavailable": "Sản phẩm này chưa hỗ trợ thanh toán Binance Pay hoặc không đủ số lượng cho phép.",
-            "too_many_pending_orders": "Bạn đang có quá nhiều đơn chờ thanh toán. Vui lòng hoàn tất hoặc hủy bớt đơn cũ.",
+            "out_of_stock": "pay_err_out_of_stock",
+            "product_unavailable": "binance_err_product_unavailable",
+            "too_many_pending_orders": "pay_err_too_many_pending",
         }
-        await safe_edit_or_reply(query, f"{vip_em('shield')} <b>{messages.get(error.code, 'Chưa thể tạo hóa đơn Binance Pay. Vui lòng thử lại sau hoặc chọn phương thức khác.')}</b>",
+        await safe_edit_or_reply(query, f"{vip_em('shield')} <b>{t(lang, messages.get(error.code, 'binance_err_generic'))}</b>",
                                  reply_markup=back, parse_mode="HTML")
         return
     conn = get_db_connection()
@@ -1907,17 +1898,18 @@ async def show_binance_checkout(query, user, qty, sku=DEFAULT_SKU):
     finally:
         conn.close()
     markup = InlineKeyboardMarkup([
-        [vip_btn("TÔI ĐÃ CHUYỂN — DÁN ID LỆNH", callback_data=f"bpid_{order_id}", emoji_name="check", style="primary")],
-        [vip_btn("Trở Về Sảnh VIP", callback_data="main_menu", emoji_name="back")],
+        [vip_btn(t(lang, "btn_binance_paste"), callback_data=f"bpid_{order_id}", emoji_name="check", style="primary")],
+        [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
     ])
-    await safe_edit_or_reply(query, render_binance_invoice(order_id, info, qty, sku), reply_markup=markup, parse_mode="HTML")
+    await safe_edit_or_reply(query, render_binance_invoice(order_id, info, qty, sku, lang), reply_markup=markup, parse_mode="HTML")
 
 
 async def prompt_binance_id(query, user, order_id: str):
     """Khách bấm 'Tôi đã chuyển': bot chờ họ gửi ID lệnh trong tin nhắn kế tiếp."""
     import time
+    lang = get_user_lang(user.id)
     if not binance_pay_enabled() or not _ORDER_CODE_RE.fullmatch(order_id or ""):
-        await query.answer("Phương thức này chưa được bật.", show_alert=True)
+        await query.answer(t(lang, "pay_method_disabled"), show_alert=True)
         return
     conn = get_db_connection()
     try:
@@ -1925,32 +1917,25 @@ async def prompt_binance_id(query, user, order_id: str):
     finally:
         conn.close()
     if not order or order["payment_method"] != "binance_pay":
-        await query.answer("Không tìm thấy đơn hàng.", show_alert=True)
+        await query.answer(t(lang, "pay_order_not_found"), show_alert=True)
         return
     if order["status"] != "pending":
-        await query.answer("Đơn này không còn chờ thanh toán.", show_alert=True)
+        await query.answer(t(lang, "pay_order_not_pending"), show_alert=True)
         return
     AWAITING_BINANCE_ID[user.id] = {"order_id": order_id, "until": time.monotonic() + BINANCE_ID_WAIT_SECONDS, "bad": 0}
     await query.answer()
     await query.message.reply_text(
-        f"{vip_em('tag')} <b>Gửi ID lệnh Binance Pay</b> cho đơn <code>{html.escape(order_id)}</code>\n\n"
-        f"Dán dãy số ID lệnh (Order ID) trong chi tiết giao dịch Binance, ví dụ: <code>453343187271753728</code>\n"
-        f"{vip_em('shield', '⚠️')} <i>Chỉ gửi ID lệnh (toàn chữ số). Mỗi đơn chỉ được thử tối đa vài lần.</i>",
+        t(lang, "binance_prompt", tag=vip_em('tag'), shield=vip_em('shield', '⚠️'), order=html.escape(order_id)),
         parse_mode="HTML")
 
 
-_BINANCE_REPLIES = {
-    "not_found": "Chưa tìm thấy giao dịch với ID này. Hãy kiểm tra lại ID lệnh và thử lại sau 1–2 phút.",
-    "amount_mismatch": "Giao dịch có số tiền khác với hóa đơn. Hệ thống chỉ chấp nhận ĐÚNG số tiền trên hóa đơn.",
-    "invalid_transaction": "Giao dịch này không hợp lệ cho đơn hàng (sai loại tiền, người nhận hoặc loại giao dịch).",
-    "before_order": "Giao dịch này được thực hiện trước khi tạo đơn nên không thể dùng cho đơn này.",
-    "already_used": "ID lệnh này đã được dùng cho một đơn khác.",
-    "too_fast": "Bạn thử hơi nhanh, vui lòng đợi khoảng 10 giây rồi gửi lại.",
-    "too_many_attempts": "Đơn này đã thử quá số lần cho phép. Vui lòng liên hệ admin kèm mã đơn.",
-    "unavailable": "Tạm thời chưa kiểm tra được với Binance. Đơn của bạn không bị ảnh hưởng, vui lòng thử lại sau ít phút.",
-    "config": "Phương thức này đang được cấu hình. Vui lòng liên hệ admin kèm mã đơn.",
-    "rejected": "Không thể xác nhận giao dịch này.",
-}
+_BINANCE_REPLY_KEYS = ("not_found", "amount_mismatch", "invalid_transaction", "before_order", "already_used",
+                       "too_fast", "too_many_attempts", "unavailable", "config", "rejected")
+
+
+def binance_reply(lang, result) -> str:
+    """Thông báo kết quả xác nhận ID lệnh theo ngôn ngữ; kết quả lạ -> 'rejected'."""
+    return t(lang, f"binance_reply_{result if result in _BINANCE_REPLY_KEYS else 'rejected'}")
 
 
 async def handle_binance_id_message(update, context) -> bool:
@@ -1965,13 +1950,14 @@ async def handle_binance_id_message(update, context) -> bool:
         return False
     text = (update.message.text or "").strip()
     order_id = waiting["order_id"]
+    lang = get_user_lang(user.id)
     if not _BINANCE_ORDER_ID_RE.fullmatch(text):
         waiting["bad"] += 1
         if waiting["bad"] >= BINANCE_MAX_BAD_INPUTS:
             AWAITING_BINANCE_ID.pop(user.id, None)
-            await update.message.reply_text("Đã dừng nhận ID lệnh. Bấm lại “Tôi đã chuyển — dán ID lệnh” khi bạn có ID.")
+            await update.message.reply_text(t(lang, "binance_id_stopped"))
         else:
-            await update.message.reply_text("ID lệnh phải là dãy 8–32 chữ số, ví dụ: 453343187271753728. Vui lòng gửi lại.")
+            await update.message.reply_text(t(lang, "binance_id_bad_format"))
         return True
     outcome = await asyncio.to_thread(confirm_web_binance, order_id, user.id, text)
     result = outcome["result"]
@@ -1979,22 +1965,19 @@ async def handle_binance_id_message(update, context) -> bool:
         AWAITING_BINANCE_ID.pop(user.id, None)
         if await send_paid_order_delivery(context.bot, order_id, user.id):
             return True
-        await update.message.reply_text(
-            f"{vip_em('check', '✅')} Thanh toán đã được xác nhận cho đơn {order_id}, nhưng link chưa thể giao tự động lúc này. "
-            f"Vui lòng liên hệ admin @wolfmodyt kèm mã đơn.")
+        await update.message.reply_text(t(lang, "binance_paid_not_delivered", check=vip_em('check', '✅'), order=order_id))
         return True
     if result == "needs_review":
         AWAITING_BINANCE_ID.pop(user.id, None)
-        await update.message.reply_text(
-            f"{vip_em('shield')} Đơn {order_id} cần admin kiểm tra thủ công (thanh toán đến sau hạn). Vui lòng liên hệ @wolfmodyt kèm mã đơn.")
+        await update.message.reply_text(t(lang, "binance_needs_review", shield=vip_em('shield'), order=order_id))
         return True
     if result in ("expired", "cancelled"):
         AWAITING_BINANCE_ID.pop(user.id, None)
-        await update.message.reply_text("Đơn này đã hết hạn hoặc bị hủy. Nếu bạn đã chuyển tiền, vui lòng liên hệ @wolfmodyt kèm mã đơn.")
+        await update.message.reply_text(t(lang, "binance_expired"))
         return True
     if result in ("too_many_attempts", "config"):
         AWAITING_BINANCE_ID.pop(user.id, None)
-    await update.message.reply_text(_BINANCE_REPLIES.get(result, _BINANCE_REPLIES["rejected"]))
+    await update.message.reply_text(binance_reply(lang, result))
     return True
 
 
@@ -2623,11 +2606,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if order["payment_method"] == "bep20" and order["status"] == "pending":
             bep20_stat = await asyncio.to_thread(check_web_bep20, order_id, user_id)
             if bep20_stat.get("status") == "needs_review":
-                await query.answer("Đã thấy giao dịch nhưng cần admin kiểm tra.", show_alert=True)
+                await query.answer(t(lang, "bep20_review_alert"), show_alert=True)
                 await query.message.reply_text(
-                    f"{vip_em('shield')} <b>Đơn <code>{html.escape(order_id)}</code> cần admin kiểm tra thủ công</b> (thanh toán đến sau hạn hoặc cần đối soát).\n"
-                    f"{vip_em('chat', '💬')} Vui lòng liên hệ <b>@wolfmodyt</b> kèm mã đơn.",
-                    reply_markup=InlineKeyboardMarkup([[vip_btn("Liên Hệ Admin", url="https://t.me/wolfmodyt", emoji_name="chat")]]),
+                    t(lang, "bep20_review_message", shield=vip_em('shield'), chat=vip_em('chat', '💬'), order=html.escape(order_id)),
+                    reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_contact_admin"), url="https://t.me/wolfmodyt", emoji_name="chat")]]),
                     parse_mode="HTML")
                 return
         web_stat = check_web_order_status(order_id)

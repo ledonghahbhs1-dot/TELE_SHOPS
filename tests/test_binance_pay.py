@@ -79,6 +79,7 @@ class BinancePayTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(lambda: shop_bot._catalogue.update(items=None, next=0.0))
         with patch.dict(os.environ, {"USDT_WALLET": ""}):
             shop_bot.init_database()
+        shop_bot.set_setting("default_lang", "vi")  # legacy tests assert the Vietnamese UI
         self.web = FakeWeb()
         opener = patch("urllib.request.urlopen", self.web)
         opener.start()

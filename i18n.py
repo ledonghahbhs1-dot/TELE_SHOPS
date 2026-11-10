@@ -67,6 +67,146 @@ STRINGS: dict[str, dict[str, str]] = {
         "vi": "Nhập mã liên kết",
         "en": "Enter link code",
     },
+    "btn_pay_binance": {
+        "vi": "USDT — Binance Pay (dán ID lệnh)",
+        "en": "USDT — Binance Pay (paste order ID)",
+    },
+    "btn_pay_bep20": {
+        "vi": "USDT BEP20 — Quét QR ví",
+        "en": "USDT BEP20 — Scan wallet QR",
+    },
+    "btn_bep20_check": {
+        "vi": "TÔI ĐÃ THANH TOÁN — KIỂM TRA",
+        "en": "I'VE PAID — CHECK",
+    },
+    "btn_binance_paste": {
+        "vi": "TÔI ĐÃ CHUYỂN — DÁN ID LỆNH",
+        "en": "I'VE SENT IT — PASTE ORDER ID",
+    },
+    "pay_method_disabled": {
+        "vi": "Phương thức này chưa được bật.",
+        "en": "This payment method is not enabled.",
+    },
+    "pay_invalid_qty": {
+        "vi": "Số lượng không hợp lệ.",
+        "en": "Invalid quantity.",
+    },
+    "pay_order_not_found": {
+        "vi": "Không tìm thấy đơn hàng.",
+        "en": "Order not found.",
+    },
+    "pay_order_not_pending": {
+        "vi": "Đơn này không còn chờ thanh toán.",
+        "en": "This order is no longer awaiting payment.",
+    },
+    "pay_err_out_of_stock": {
+        "vi": "Sản phẩm hiện đã hết hàng.",
+        "en": "This product is currently out of stock.",
+    },
+    "pay_err_busy": {
+        "vi": "Hệ thống đang bận, vui lòng thử lại sau ít phút.",
+        "en": "The system is busy, please try again in a few minutes.",
+    },
+    "pay_err_too_many_pending": {
+        "vi": "Bạn đang có quá nhiều đơn chờ thanh toán. Vui lòng hoàn tất hoặc hủy bớt đơn cũ.",
+        "en": "You have too many orders awaiting payment. Please complete or cancel some older orders.",
+    },
+    "bep20_err_product_unavailable": {
+        "vi": "Sản phẩm này chưa hỗ trợ thanh toán USDT BEP20 hoặc không đủ số lượng cho phép.",
+        "en": "This product does not support USDT BEP20 payment yet, or the quantity is not allowed.",
+    },
+    "bep20_err_generic": {
+        "vi": "Chưa thể tạo hóa đơn USDT BEP20. Vui lòng thử lại sau hoặc chọn phương thức khác.",
+        "en": "Could not create the USDT BEP20 invoice. Please try again later or choose another payment method.",
+    },
+    "binance_err_product_unavailable": {
+        "vi": "Sản phẩm này chưa hỗ trợ thanh toán Binance Pay hoặc không đủ số lượng cho phép.",
+        "en": "This product does not support Binance Pay yet, or the quantity is not allowed.",
+    },
+    "binance_err_generic": {
+        "vi": "Chưa thể tạo hóa đơn Binance Pay. Vui lòng thử lại sau hoặc chọn phương thức khác.",
+        "en": "Could not create the Binance Pay invoice. Please try again later or choose another payment method.",
+    },
+    "bep20_invoice": {
+        "vi": "{crown} ═══════ {diamond} <b>HÓA ĐƠN USDT BEP20</b> {diamond} ═══════ {crown}\n\n{tag} <b>Mã đơn:</b> <code>{order}</code>\n{box} <b>Sản phẩm:</b> {product} × {qty}\n{globe} <b>Mạng:</b> BNB Smart Chain (BEP20) — token <b>USDT</b>\n{money} <b>Số tiền CHÍNH XÁC:</b> <code>{amount}</code> USDT\n{card} <b>Địa chỉ ví nhận:</b>\n<code>{address}</code>\n{calendar} <b>Hạn thanh toán:</b> <code>{deadline}</code>\n\n{shield} <i>Chỉ chuyển USDT trên mạng BEP20 (BSC), đúng từng chữ số ở trên (không làm tròn). Chuyển sai mạng, sai token hoặc sai số tiền sẽ không được xác nhận tự động và có thể mất tiền.</i>\n{lightning} <i>Sau khi chuyển, bấm “Tôi đã thanh toán — kiểm tra”. Cần khoảng {confirmations} xác nhận mạng.</i>",
+        "en": "{crown} ═══════ {diamond} <b>USDT BEP20 INVOICE</b> {diamond} ═══════ {crown}\n\n{tag} <b>Order ID:</b> <code>{order}</code>\n{box} <b>Product:</b> {product} × {qty}\n{globe} <b>Network:</b> BNB Smart Chain (BEP20) — token <b>USDT</b>\n{money} <b>EXACT amount:</b> <code>{amount}</code> USDT\n{card} <b>Receiving wallet address:</b>\n<code>{address}</code>\n{calendar} <b>Pay before:</b> <code>{deadline}</code>\n\n{shield} <i>Send USDT only on the BEP20 (BSC) network, with exactly the digits above (no rounding). A wrong network, wrong token or wrong amount will not be confirmed automatically and you may lose your funds.</i>\n{lightning} <i>After sending, tap “I've paid — check”. About {confirmations} network confirmations are needed.</i>",
+    },
+    "binance_invoice": {
+        "vi": "{crown} ═══════ {diamond} <b>HÓA ĐƠN USDT — BINANCE PAY</b> {diamond} ═══════ {crown}\n\n{tag} <b>Mã đơn:</b> <code>{order}</code>\n{box} <b>Sản phẩm:</b> {product} × {qty}\n{money} <b>Số tiền:</b> <code>{amount}</code> USDT\n{card} <b>Binance Pay ID nhận:</b> <code>{receiver}</code>\n{calendar} <b>Hạn thanh toán:</b> <code>{deadline}</code>\n\n{shield} <i>Mở Binance → Pay → Gửi, nhập Binance Pay ID ở trên và chuyển ĐÚNG số tiền trên bằng USDT. Sai số tiền hoặc sai loại tiền sẽ không được xác nhận tự động.</i>\n{lightning} <i>Sau khi chuyển, GIỮ LẠI “ID lệnh” (Order ID) trong chi tiết giao dịch, bấm nút bên dưới rồi dán ID lệnh vào đây.</i>",
+        "en": "{crown} ═══════ {diamond} <b>USDT INVOICE — BINANCE PAY</b> {diamond} ═══════ {crown}\n\n{tag} <b>Order ID:</b> <code>{order}</code>\n{box} <b>Product:</b> {product} × {qty}\n{money} <b>Amount:</b> <code>{amount}</code> USDT\n{card} <b>Receiving Binance Pay ID:</b> <code>{receiver}</code>\n{calendar} <b>Pay before:</b> <code>{deadline}</code>\n\n{shield} <i>Open Binance → Pay → Send, enter the Binance Pay ID above and send EXACTLY the amount above in USDT. A wrong amount or wrong currency will not be confirmed automatically.</i>\n{lightning} <i>After sending, KEEP the transaction “Order ID” from the payment details, tap the button below, then paste the order ID here.</i>",
+    },
+    "binance_prompt": {
+        "vi": "{tag} <b>Gửi ID lệnh Binance Pay</b> cho đơn <code>{order}</code>\n\nDán dãy số ID lệnh (Order ID) trong chi tiết giao dịch Binance, ví dụ: <code>453343187271753728</code>\n{shield} <i>Chỉ gửi ID lệnh (toàn chữ số). Mỗi đơn chỉ được thử tối đa vài lần.</i>",
+        "en": "{tag} <b>Send your Binance Pay order ID</b> for order <code>{order}</code>\n\nPaste the order ID from your Binance transaction details, for example: <code>453343187271753728</code>\n{shield} <i>Send the order ID only (digits only). Each order allows only a few attempts.</i>",
+    },
+    "binance_reply_not_found": {
+        "vi": "Chưa tìm thấy giao dịch với ID này. Hãy kiểm tra lại ID lệnh và thử lại sau 1–2 phút.",
+        "en": "No transaction found with this ID. Please check the order ID and try again in 1–2 minutes.",
+    },
+    "binance_reply_amount_mismatch": {
+        "vi": "Giao dịch có số tiền khác với hóa đơn. Hệ thống chỉ chấp nhận ĐÚNG số tiền trên hóa đơn.",
+        "en": "The transaction amount differs from the invoice. Only the EXACT invoice amount is accepted.",
+    },
+    "binance_reply_invalid_transaction": {
+        "vi": "Giao dịch này không hợp lệ cho đơn hàng (sai loại tiền, người nhận hoặc loại giao dịch).",
+        "en": "This transaction is not valid for the order (wrong currency, recipient or transaction type).",
+    },
+    "binance_reply_before_order": {
+        "vi": "Giao dịch này được thực hiện trước khi tạo đơn nên không thể dùng cho đơn này.",
+        "en": "This transaction was made before the order was created, so it cannot be used for this order.",
+    },
+    "binance_reply_already_used": {
+        "vi": "ID lệnh này đã được dùng cho một đơn khác.",
+        "en": "This order ID has already been used for another order.",
+    },
+    "binance_reply_too_fast": {
+        "vi": "Bạn thử hơi nhanh, vui lòng đợi khoảng 10 giây rồi gửi lại.",
+        "en": "You are trying too fast, please wait about 10 seconds and send it again.",
+    },
+    "binance_reply_too_many_attempts": {
+        "vi": "Đơn này đã thử quá số lần cho phép. Vui lòng liên hệ admin kèm mã đơn.",
+        "en": "This order has exceeded the allowed number of attempts. Please contact the admin with your order ID.",
+    },
+    "binance_reply_unavailable": {
+        "vi": "Tạm thời chưa kiểm tra được với Binance. Đơn của bạn không bị ảnh hưởng, vui lòng thử lại sau ít phút.",
+        "en": "Binance cannot be checked right now. Your order is not affected, please try again in a few minutes.",
+    },
+    "binance_reply_config": {
+        "vi": "Phương thức này đang được cấu hình. Vui lòng liên hệ admin kèm mã đơn.",
+        "en": "This method is being configured. Please contact the admin with your order ID.",
+    },
+    "binance_reply_rejected": {
+        "vi": "Không thể xác nhận giao dịch này.",
+        "en": "This transaction cannot be confirmed.",
+    },
+    "binance_id_stopped": {
+        "vi": "Đã dừng nhận ID lệnh. Bấm lại “Tôi đã chuyển — dán ID lệnh” khi bạn có ID.",
+        "en": "Stopped waiting for an order ID. Tap “I've sent it — paste order ID” again when you have it.",
+    },
+    "binance_id_bad_format": {
+        "vi": "ID lệnh phải là dãy 8–32 chữ số, ví dụ: 453343187271753728. Vui lòng gửi lại.",
+        "en": "The order ID must be 8–32 digits, for example: 453343187271753728. Please send it again.",
+    },
+    "binance_paid_not_delivered": {
+        "vi": "{check} Thanh toán đã được xác nhận cho đơn {order}, nhưng link chưa thể giao tự động lúc này. Vui lòng liên hệ admin @wolfmodyt kèm mã đơn.",
+        "en": "{check} Payment is confirmed for order {order}, but the link cannot be delivered automatically right now. Please contact the admin @wolfmodyt with your order ID.",
+    },
+    "binance_needs_review": {
+        "vi": "{shield} Đơn {order} cần admin kiểm tra thủ công (thanh toán đến sau hạn). Vui lòng liên hệ @wolfmodyt kèm mã đơn.",
+        "en": "{shield} Order {order} needs a manual check by the admin (payment arrived after the deadline). Please contact @wolfmodyt with your order ID.",
+    },
+    "binance_expired": {
+        "vi": "Đơn này đã hết hạn hoặc bị hủy. Nếu bạn đã chuyển tiền, vui lòng liên hệ @wolfmodyt kèm mã đơn.",
+        "en": "This order has expired or been cancelled. If you have already paid, please contact @wolfmodyt with your order ID.",
+    },
+    "bep20_review_alert": {
+        "vi": "Đã thấy giao dịch nhưng cần admin kiểm tra.",
+        "en": "Transaction seen, but the admin needs to check it.",
+    },
+    "bep20_review_message": {
+        "vi": "{shield} <b>Đơn <code>{order}</code> cần admin kiểm tra thủ công</b> (thanh toán đến sau hạn hoặc cần đối soát).\n{chat} Vui lòng liên hệ <b>@wolfmodyt</b> kèm mã đơn.",
+        "en": "{shield} <b>Order <code>{order}</code> needs a manual check by the admin</b> (payment arrived after the deadline or needs reconciliation).\n{chat} Please contact <b>@wolfmodyt</b> with your order ID.",
+    },
     "btn_wallet_balance": {"vi": "Xem số dư", "en": "View balance"},
     "btn_wallet_topup": {
         "vi": "Nạp tiền",
