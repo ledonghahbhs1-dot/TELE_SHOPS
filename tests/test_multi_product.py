@@ -89,7 +89,8 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sold_out_detail_screen_has_no_purchase_buttons(self):
         query = make_query(f"buy_{PRO}")
-        with self.stock(plus=10, pro=0), patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render:
+        with self.stock(plus=10, pro=0), patch.object(shop_bot, "safe_edit_or_reply", new_callable=AsyncMock) as render, \
+             patch.object(shop_bot, "get_product_banner_path", return_value=None):
             await shop_bot.callback_handler(make_update(query), SimpleNamespace())
         text = render.await_args.args[1]
         self.assertIn("HẾT HÀNG", text)
