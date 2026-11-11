@@ -23,6 +23,7 @@ import product_guides
 import product_intros
 import stock_notify
 import wallet_store
+import wallet_topup
 from i18n import t
 from telegram import (
     Update,
@@ -299,6 +300,12 @@ def init_database():
         cursor.execute("ALTER TABLE orders ADD COLUMN delivery_notified_at TIMESTAMP")
         # Existing completed orders were already handled by the old bot.
         cursor.execute("UPDATE orders SET delivery_notified_at = COALESCE(completed_at, CURRENT_TIMESTAMP) WHERE status = 'completed'")
+    except sqlite3.OperationalError:
+        pass
+
+    # Loại đơn: 'purchase' (mặc định) hoặc 'wallet_topup' (nạp ví, không có hàng để giao).
+    try:
+        cursor.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'purchase'")
     except sqlite3.OperationalError:
         pass
 
@@ -997,7 +1004,7 @@ def get_user_lang(user_id) -> str:
         row = conn.execute("SELECT lang FROM user_lang WHERE user_id = ?", (uid,)).fetchone()
         if row:
             return i18n.normalize_lang(row["lang"])
-        has_history = conn.execute("SELECT 1 FROM orders WHERE user_id = ? LIMIT 1", (uid,)).fetchone()
+        has_history = conn.execute("SELECT 1 FROM orders WHERE user_id = ? AND kind <> 'wallet_topup' LIMIT 1", (uid,)).fetchone()
     finally:
         conn.close()
     return i18n.LEGACY_LANG if has_history else get_default_lang()
@@ -1221,7 +1228,7 @@ def sync_all_pending_orders_on_startup():
     """Đồng bộ tất cả đơn pending trong SQLite lên web khi bot khởi động"""
     try:
         conn = get_db_connection()
-        pending = conn.execute("SELECT * FROM orders WHERE status = 'pending'").fetchall()
+        pending = conn.execute("SELECT * FROM orders WHERE status = 'pending' AND kind <> 'wallet_topup'").fetchall()
         conn.close()
         for ord_row in pending:
             cur = ord_row["currency"] if "currency" in ord_row.keys() and ord_row["currency"] else "VND"
@@ -1325,11 +1332,11 @@ def render_orders_page(user_id: int, page: int, lang: str | None = None):
     lang = lang or get_user_lang(user_id)
     conn = get_db_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'completed'", (user_id,)).fetchone()["n"]
+        total = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'completed' AND kind <> 'wallet_topup'", (user_id,)).fetchone()["n"]
         pages = max(1, (total + ORDERS_PAGE_SIZE - 1) // ORDERS_PAGE_SIZE)
         page = min(max(1, page), pages)
         rows = conn.execute(
-            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' "
+            "SELECT * FROM orders WHERE user_id = ? AND status = 'completed' AND kind <> 'wallet_topup' "
             "ORDER BY completed_at DESC, created_at DESC, order_id DESC LIMIT ? OFFSET ?",
             (user_id, ORDERS_PAGE_SIZE, (page - 1) * ORDERS_PAGE_SIZE),
         ).fetchall()
@@ -2026,9 +2033,174 @@ def build_wallet_screen(user_id: int, lang: str):
         sign = "+" if row["amount_vnd"] > 0 else "-"
         label = t(lang, f"wallet_kind_{row['kind']}")
         lines.append(f"{sign}{abs(row['amount_vnd']):,} · {label} · {str(row['created_at'])[:16]}")
-    text = t(lang, "wallet_screen", wallet=vip_em('wallet', '👛'), balance=i18n.fmt_vnd(balance), usd=i18n.fmt_usd(balance),
-             history=html.escape("\n".join(lines)) if lines else t(lang, "wallet_history_empty"))
-    return text, InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]])
+    topup_on = topup_enabled()
+    text = t(lang, "wallet_screen_t" if topup_on else "wallet_screen", wallet=vip_em('wallet', '👛'), balance=i18n.fmt_vnd(balance),
+             usd=i18n.fmt_usd(balance), history=html.escape("\n".join(lines)) if lines else t(lang, "wallet_history_empty"))
+    rows = []
+    if topup_on:
+        rows.append([vip_btn(t(lang, "btn_topup_open"), callback_data="wtop", emoji_name="money", style="primary")])
+    rows.append([vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")])
+    return text, InlineKeyboardMarkup(rows)
+
+
+AWAITING_TOPUP_AMOUNT: set[int] = set()
+_TOPUP_AMOUNT_CB = re.compile(r"wtop_a:(\d{1,9})")
+
+
+def topup_enabled() -> bool:
+    """Nạp ví: cần WALLET_ENABLED hợp lệ (có Volume) VÀ WALLET_TOPUP_ENABLED=1 (mặc định TẮT)."""
+    return wallet_topup.topup_flag_on() and wallet_enabled()
+
+
+def _wallet_back_markup(lang: str, callback: str = "wallet") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data=callback, emoji_name="back")]])
+
+
+def build_topup_menu(lang: str):
+    amounts = [vip_btn(i18n.fmt_vnd(a), callback_data=f"wtop_a:{a}", emoji_name="money") for a in wallet_topup.QUICK_AMOUNTS]
+    rows = [amounts[i:i + 2] for i in range(0, len(amounts), 2)]
+    rows.append([vip_btn(t(lang, "btn_topup_other"), callback_data="wtop_c", emoji_name="memo")])
+    rows.append([vip_btn(t(lang, "btn_back_main"), callback_data="wallet", emoji_name="back")])
+    text = t(lang, "topup_menu", min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
+             cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND))
+    return text, InlineKeyboardMarkup(rows)
+
+
+def settle_topup_sync(order_id: str, user_id: int, web_status: dict):
+    conn = get_db_connection()
+    try:
+        return wallet_topup.settle(conn, order_id, int(user_id), web_status)
+    finally:
+        conn.close()
+
+
+async def settle_and_notify_topup(bot, order_id, user_id, web_status: dict):
+    """Điểm xác nhận nền cho đơn nạp: cộng ví (một lần) rồi báo khách. Lỗi gửi tin KHÔNG làm mất tiền đã cộng."""
+    try:
+        result = await asyncio.to_thread(settle_topup_sync, str(order_id), int(user_id), web_status)
+    except Exception as error:
+        logger.error("Nạp ví: không cộng được đơn %s: %s", order_id, type(error).__name__)
+        return None
+    if result.state == "credited":
+        lang = get_user_lang(user_id)
+        try:
+            await bot.send_message(
+                chat_id=int(user_id), parse_mode="HTML", reply_markup=_wallet_back_markup(lang),
+                text=f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_vnd(result.amount_vnd),
+                                                  balance=i18n.fmt_vnd(result.balance_vnd), order=html.escape(str(order_id))))
+        except Exception as error:
+            logger.warning("Nạp ví: không gửi được tin báo đơn %s: %s", order_id, type(error).__name__)
+    return result
+
+
+def build_topup_bill(lang: str, order) -> str:
+    try:
+        expires_display = datetime.strptime(order.expires_at, "%Y-%m-%d %H:%M:%S").strftime("%H:%M:%S")
+    except ValueError:
+        expires_display = t(lang, "bill_ten_minutes")
+    return build_vietqr_bill(lang, order.order_id, t(lang, "topup_bill_service"), 1, order.amount_vnd, order.bank_name,
+                             order.bank_account, order.bank_owner, expires_display)
+
+
+async def send_topup_invoice(message, user, amount: int, lang: str) -> None:
+    """Tạo đơn nạp (đã đồng bộ lên web) rồi mới gửi QR. Lỗi/giới hạn -> báo thân thiện, KHÔNG hiện QR."""
+    def create():
+        conn = get_db_connection()
+        try:
+            return wallet_topup.create_order(
+                conn, user.id, user.username or user.first_name, amount,
+                bank=(get_setting("bank_name", "ACB"), get_setting("bank_account", "68986683"), get_setting("bank_owner", "LE DONG HA")),
+                post_web=_post_web_json)
+        finally:
+            conn.close()
+
+    back = _wallet_back_markup(lang, "wtop")
+    try:
+        order = await asyncio.to_thread(create)
+    except wallet_topup.TopupError as error:
+        key = {"invalid_amount": "topup_err_amount", "balance_cap": "topup_err_cap",
+               "too_many_pending": "topup_err_pending"}.get(error.code, "topup_err_unavailable")
+        await message.reply_text(
+            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
+                                          cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
+            reply_markup=back, parse_mode="HTML")
+        return
+    except Exception as error:
+        logger.error("Nạp ví: lỗi tạo đơn: %s", type(error).__name__)
+        await message.reply_text(f"{vip_em('cross', '❌')} " + t(lang, "topup_err_unavailable"), reply_markup=back, parse_mode="HTML")
+        return
+    bill = build_topup_bill(lang, order)
+    buttons = [
+        [vip_btn(t(lang, "btn_paid_done"), callback_data=f"confirm_pay_{order.order_id}", emoji_name="check", style="primary")],
+        [vip_btn(t(lang, "btn_cancel_tx"), callback_data=f"cancel_order_{order.order_id}", emoji_name="cross", style="danger")],
+        [vip_btn(t(lang, "btn_back_main"), callback_data="wallet", emoji_name="back")],
+    ]
+    qr_bytes = generate_vietqr_png_bytes(order.bank_name, order.bank_account, order.bank_owner, order.amount_vnd, order.order_id)
+    try:
+        if qr_bytes:
+            bio = io.BytesIO(qr_bytes)
+            bio.name = f"{order.order_id}.png"
+            await message.reply_photo(photo=bio, caption=bill, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
+            return
+    except Exception as error:
+        logger.warning("Nạp ví: lỗi gửi ảnh QR: %s", type(error).__name__)
+    await message.reply_text(bill, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
+
+
+async def handle_topup_check(query, context, order, lang: str) -> None:
+    """Nút "Tôi đã thanh toán" của đơn nạp: hỏi web rồi cộng ví qua settle (idempotent). Không bao giờ giao hàng/kho."""
+    order_id = order["order_id"]
+    web_stat = await asyncio.to_thread(check_web_order_status, order_id)
+    try:
+        result = await asyncio.to_thread(settle_topup_sync, order_id, order["user_id"], web_stat)
+    except Exception as error:
+        logger.error("Nạp ví: không cộng được đơn %s: %s", order_id, type(error).__name__)
+        await query.answer(t(lang, "topup_err_unavailable_short"), show_alert=True)
+        return
+    if result.state == "credited":
+        await query.answer(t(lang, "topup_credited_alert"), show_alert=True)
+        await query.message.reply_text(
+            f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_vnd(result.amount_vnd),
+                                         balance=i18n.fmt_vnd(result.balance_vnd), order=html.escape(order_id)),
+            reply_markup=_wallet_back_markup(lang), parse_mode="HTML")
+    elif result.state == "already_credited":
+        await query.answer(t(lang, "topup_already_alert"), show_alert=True)
+    elif result.state == "needs_review":
+        await query.answer(t(lang, "bep20_review_alert"), show_alert=True)
+        await query.message.reply_text(
+            t(lang, "bep20_review_message", shield=vip_em('shield'), chat=vip_em('chat', '💬'), order=html.escape(order_id)),
+            reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_contact_admin"), url="https://t.me/wolfmodyt", emoji_name="chat")]]),
+            parse_mode="HTML")
+    elif order["status"] in ("cancelled", "expired"):
+        await query.answer(t(lang, "order_expired_alert"), show_alert=True)
+        await query.message.reply_text(f"{vip_em('cross', '❌')} " + t(lang, "topup_expired", order_id=html.escape(order_id)),
+                                       reply_markup=_wallet_back_markup(lang), parse_mode="HTML")
+    else:
+        await query.answer(t(lang, "check_not_received"), show_alert=True)
+
+
+async def handle_topup_callback(query, user, lang: str, data: str) -> None:
+    """wtop (menu) | wtop_c (nhập số khác) | wtop_a:<số> (số tiền nhanh). Chỉ trong chat riêng và khi bật."""
+    if not topup_enabled():
+        await safe_edit_or_reply(query, f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}",
+                                 reply_markup=_wallet_back_markup(lang, "main_menu"), parse_mode="HTML")
+        return
+    if not _is_private_chat(query.message):
+        await query.answer(t(lang, "wallet_private_only"), show_alert=True)
+        return
+    if data == "wtop":
+        text, markup = build_topup_menu(lang)
+        await safe_edit_or_reply(query, text, reply_markup=markup, parse_mode="HTML")
+    elif data == "wtop_c":
+        AWAITING_TOPUP_AMOUNT.add(user.id)
+        await safe_edit_or_reply(
+            query, t(lang, "topup_prompt", min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND)),
+            reply_markup=_wallet_back_markup(lang, "wtop"), parse_mode="HTML")
+    else:
+        match = _TOPUP_AMOUNT_CB.fullmatch(data)
+        if not match:
+            return
+        await send_topup_invoice(query.message, user, int(match.group(1)), lang)
 
 
 async def handle_wallet_view(query, user, lang: str) -> None:
@@ -2159,6 +2331,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     custom_sku = data[3:] if data.startswith("cq:") and data[3:] in known_skus() else None
     if data != "custom_qty" and custom_sku is None:
         AWAITING_QTY_USERS.pop(user_id, None)
+    if data != "wtop_c":
+        AWAITING_TOPUP_AMOUNT.discard(user_id)
 
     if data in ("main_menu", "buy_gemini_plus", "custom_qty"):
         await asyncio.to_thread(sync_web_product_price)
@@ -2497,6 +2671,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(t(lang, "order_not_found"), show_alert=True)
             return
 
+        if order["kind"] == "wallet_topup":
+            await handle_topup_check(query, context, order, lang)
+            return
+
         if order["status"] == "completed":
             if not order["delivery_notified_at"]:
                 sent = await send_paid_order_delivery(context.bot, order_id, user_id)
@@ -2652,6 +2830,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [vip_btn(t(lang, "btn_my_orders"), callback_data="my_orders", emoji_name="diamond")],
                 [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
+
+    elif data == "wtop" or data == "wtop_c" or data.startswith("wtop_a:"):
+        await handle_topup_callback(query, user, lang, data)
 
     elif data == "wallet":
         await handle_wallet_view(query, user, lang)
@@ -3110,6 +3291,20 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
     if binance_pay_enabled() and user_id in AWAITING_BINANCE_ID and await handle_binance_id_message(update, context):
         return
 
+    # Đang chờ số tiền nạp ví tuỳ chọn
+    if user_id in AWAITING_TOPUP_AMOUNT:
+        lang = get_user_lang(user_id)
+        amount = wallet_topup.parse_amount(raw_text)
+        if amount is None:
+            await update.message.reply_text(f"{vip_em('cross', '❌')} {t(lang, 'topup_not_number')}", parse_mode="HTML")
+            return
+        AWAITING_TOPUP_AMOUNT.discard(user_id)
+        if not topup_enabled() or not _is_private_chat(update.message):
+            await update.message.reply_text(f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}", parse_mode="HTML")
+            return
+        await send_topup_invoice(update.message, user, amount, lang)
+        return
+
     # Nếu người dùng đang trong luồng nhập số lượng tùy chỉnh
     if user_id in AWAITING_QTY_USERS:
         sku = AWAITING_QTY_USERS[user_id]
@@ -3155,16 +3350,22 @@ async def auto_deliver_paid_orders_task(application: Application):
         try:
             conn = get_db_connection()
             rows = conn.execute(
-                """SELECT order_id, user_id, status, payment_method FROM orders
+                """SELECT order_id, user_id, status, payment_method, kind FROM orders
                    WHERE delivery_notified_at IS NULL
                      AND status IN ('pending', 'cancelled', 'expired', 'completed')
                      AND created_at >= datetime('now', '-7 days')
+                     AND (kind <> 'wallet_topup' OR created_at >= datetime('now', '-2 days'))
                    ORDER BY created_at DESC LIMIT 100"""
             ).fetchall()
             conn.close()
             for row in rows:
                 # The web status endpoint has a 10 requests/minute limit.
                 await asyncio.sleep(8)
+                if row["kind"] == "wallet_topup":
+                    # Nạp ví: không bao giờ giao hàng/kho; chỉ cộng ví qua settle (kể cả đơn đã hủy/hết hạn mà web báo paid).
+                    stat = await asyncio.to_thread(check_web_order_status, row["order_id"])
+                    await settle_and_notify_topup(application.bot, row["order_id"], row["user_id"], stat)
+                    continue
                 if row["status"] == "completed":
                     await send_paid_order_delivery(application.bot, row["order_id"], row["user_id"])
                     continue
@@ -3202,10 +3403,22 @@ async def auto_cancel_expired_orders_task(application: Application):
                 web_stat = await asyncio.to_thread(check_web_order_status, order_id)
                 if web_stat.get("status") in ("paid", "delivered"):
                     logger.info("Giữ đơn %s đã được web xác nhận thanh toán, không tự hủy.", order_id)
+                    if ord_row["kind"] == "wallet_topup":
+                        await settle_and_notify_topup(application.bot, order_id, user_id, web_stat)
                     continue
                 conn.execute("UPDATE orders SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'", (order_id,))
                 conn.commit()
                 logger.info(f"Đã tự động hủy đơn hết hạn 10 phút: {order_id} (User: {user_id})")
+                if ord_row["kind"] == "wallet_topup":
+                    try:
+                        ulang = get_user_lang(user_id)
+                        await application.bot.send_message(
+                            chat_id=int(user_id), text=f"{vip_em('cross', '❌')} {t(ulang, 'topup_expired', order_id=html.escape(str(order_id)))}",
+                            reply_markup=InlineKeyboardMarkup([[vip_btn(t(ulang, "btn_back_main"), callback_data="wallet", emoji_name="back")]]),
+                            parse_mode="HTML")
+                    except Exception as e_notify:
+                        logger.warning("Không gửi được thông báo hủy đơn nạp %s: %s", order_id, type(e_notify).__name__)
+                    continue
 
                 # Gửi thông báo đến khách hàng trên Telegram
                 try:
