@@ -825,11 +825,18 @@ def generate_crypto_qr_png_bytes(address: str) -> bytes | None:
 
 # ==================== MENU & GIAO DIỆN INLINE (VIP EDITION WITH ANIMATED EMOJIS) ====================
 
-# One custom emoji for the product list (shop title + product buttons). Set here ONLY; everything else refers to the "product" key.
-BOT_ICON_CUSTOM_EMOJI_ID = "5796185041717433060"
+# Per-product icons for the shop list buttons (task 068). 5796185041717433060 is the ChatGPT logo: ONLY ChatGPT products get it.
+# Edit icons HERE and nowhere else.
+CHATGPT_ICON_CUSTOM_EMOJI_ID = "5796185041717433060"
+BOT_ICON_CUSTOM_EMOJI_ID = CHATGPT_ICON_CUSTOM_EMOJI_ID  # kept name from task 067
+BOT_PRODUCT_ICON = {
+    "chatgpt_go_3m": CHATGPT_ICON_CUSTOM_EMOJI_ID,
+}
+# Google logo id: leave empty until Goof sends it. When set, applies to every SKU in GOOGLE_SKUS; empty = default crown/cross.
+GOOGLE_ICON_CUSTOM_EMOJI_ID = ""
+GOOGLE_SKUS = ("gemini_plus", "gemini_pro_account")
 
 VIP_EMOJIS = {
-    "product": BOT_ICON_CUSTOM_EMOJI_ID,  # icon of the shop list (replaces crown / cross on product buttons)
     "crown": "5807868868886009920",      # 👑 Vương miện VIP
     "diamond": "5963312935148195483",    # 💎 Kim cương VIP
     "star": "5874948844935974490",       # ⭐️ Ngôi sao sáng
@@ -865,7 +872,6 @@ VIP_EMOJIS = {
 }
 
 FALLBACK_BUTTON_EMOJIS = {
-    "product": "👑",
     "crown": "👑",
     "diamond": "💎",
     "star": "⭐️",
@@ -934,7 +940,16 @@ def strip_button_emojis(text: str) -> str:
     s = re.sub(pattern_end, "", s)
     return s.strip()
 
-def vip_btn(text: str, callback_data: str = None, url: str = None, emoji_name: str = None, style: str = None) -> InlineKeyboardButton:
+def product_icon_id(sku: str) -> str:
+    """Custom emoji id for a product button, or "" to use the default crown/cross. Never gives ChatGPT's id to other SKUs."""
+    if BOT_PRODUCT_ICON.get(sku):
+        return BOT_PRODUCT_ICON[sku]
+    if GOOGLE_ICON_CUSTOM_EMOJI_ID and sku in GOOGLE_SKUS:
+        return GOOGLE_ICON_CUSTOM_EMOJI_ID
+    return ""
+
+
+def vip_btn(text: str, callback_data: str = None, url: str = None, emoji_name: str = None, style: str = None, icon_id: str = None) -> InlineKeyboardButton:
     """Tạo nút InlineKeyboardButton VIP với DUY NHẤT 1 custom emoji id (icon_custom_emoji_id),
     TUYỆT ĐỐI KHÔNG DÙNG ICON THƯỜNG TRONG TEXT NHÃN NÚT THEO QUY TẮC GEMINI.MD."""
     clean_label = strip_button_emojis(text)
@@ -942,7 +957,9 @@ def vip_btn(text: str, callback_data: str = None, url: str = None, emoji_name: s
     if style:
         kwargs["style"] = style
 
-    if emoji_name and emoji_name in VIP_EMOJIS:
+    if icon_id:
+        kwargs["icon_custom_emoji_id"] = icon_id
+    elif emoji_name and emoji_name in VIP_EMOJIS:
         kwargs["icon_custom_emoji_id"] = VIP_EMOJIS[emoji_name]
     elif emoji_name == "memo":
         kwargs["icon_custom_emoji_id"] = VIP_EMOJIS.get("edit", VIP_EMOJIS["memo"])
@@ -1605,7 +1622,7 @@ def main_menu_keyboard(user_id=None, lang: str | None = None):
 
 
 def shop_message(lang: str) -> str:
-    return (f"{vip_em('product', '👑')} ═══════ {vip_em('diamond', '💎')} {t(lang, 'shop_title')} {vip_em('diamond', '💎')} ═══════ {vip_em('product', '👑')}\n\n"
+    return (f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} {t(lang, 'shop_title')} {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
             f"{vip_em('star', '👇')} {t(lang, 'shop_hint')}")
 
 
@@ -1624,11 +1641,11 @@ def shop_keyboard(user_id=None, lang: str | None = None):
                 text = t(lang, "btn_product_buy", name=label, stock=get_stock_count(sku))
             else:
                 text = t(lang, "btn_product_buy_nostock", name=label)
-            keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="product", style="primary")])
+            keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="crown", style="primary", icon_id=product_icon_id(sku))])
         else:
             # gemini_plus keeps opening its own page (which says sold out), as before; others show a sold-out alert.
             cb = cb_buy(sku) if sku == DEFAULT_SKU else f"soldout_{sku}"
-            keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label), callback_data=cb, emoji_name="product")])
+            keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label), callback_data=cb, emoji_name="cross", icon_id=product_icon_id(sku))])
     keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
     return InlineKeyboardMarkup(keyboard)
 
