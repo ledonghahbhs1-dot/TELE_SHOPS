@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -23,6 +24,7 @@ import wallet_store
 KEEP_BACKUPS = 14
 BACKUP_INTERVAL_HOURS = 6
 BACKUP_DIRNAME = "backups"
+STALE_PART_SECONDS = 3600
 _BACKUP_RE = re.compile(r"shop-(\d{8}-\d{6})(?:-(\d+))?\.db")
 
 
@@ -142,6 +144,7 @@ def make_backup(conn: sqlite3.Connection, data_dir: str, *, now: datetime | None
     """Write a consistent snapshot of the database into ``<data_dir>/backups`` and prune to the newest ``keep`` files."""
     directory = backup_dir(data_dir)
     os.makedirs(directory, exist_ok=True)
+    _remove_stale_parts(directory)
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     path, n = os.path.join(directory, f"shop-{stamp}.db"), 0
     while os.path.exists(path):             # two backups in the same second
@@ -164,6 +167,24 @@ def make_backup(conn: sqlite3.Connection, data_dir: str, *, now: datetime | None
     for old in list_backups(data_dir)[:-keep]:
         _remove(old)
     return path
+
+
+def _remove_stale_parts(directory: str) -> None:
+    """Delete ``shop-*.db.part`` files older than ``STALE_PART_SECONDS`` (a backup killed half way). Newer ones may still be
+    being written; files with any other name are never touched."""
+    cutoff = time.time() - STALE_PART_SECONDS
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".part") and _BACKUP_RE.fullmatch(name[:-len(".part")]):
+            path = os.path.join(directory, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    _remove(path)
+            except OSError:
+                pass
 
 
 def _remove(path: str) -> None:
