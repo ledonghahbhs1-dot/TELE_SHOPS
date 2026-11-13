@@ -1,0 +1,83 @@
+{
+  "_comment": "Bot<->web contract fixture. Requests = what the bot sends (asserted against the REAL bot functions); replies = valid/error web answers the bot must read as 'expect'. Mirror of scripts/test-wallet-bot-web-contract.ts in the web repo (v0-key-verification-system). If a web route or this bot's request/parse code changes, update BOTH this file and that script.",
+  "usdt": {
+    "order_id": "TGSA1B2C3D4",
+    "amount_vnd": 100000,
+    "request": {"order_code": "TGSA1B2C3D4", "tg_user_id": 960001, "tg_username": "bot_user", "kind": "wallet_topup", "amount_vnd": 100000, "currency": "USDT"},
+    "ok": {
+      "plisio": {"success": true, "order_code": "TGSA1B2C3D4", "qty": 1, "amount_vnd": 100000, "amount_usdt": 4, "expires_at": "2026-11-13T15:40:00.000Z", "txn_id": "txn-TGSA1B2C3D4", "invoice_url": "https://plisio.net/invoice/TGSA1B2C3D4", "currency": "USDT_TRX", "expect": {"amount_usdt": "4"}},
+      "bep20": {"success": true, "order_code": "TGSA1B2C3D4", "network": "BSC (BEP20)", "token": "USDT", "contract": "0x2222222222222222222222222222222222222222", "address": "0x1111111111111111111111111111111111111111", "amount_usdt": "4.01", "qty": 1, "amount_vnd": 100000, "expires_at": "2026-11-13T15:40:00.000Z", "min_confirmations": 3, "expect": {"amount_usdt": "4.01"}},
+      "binance": {"success": true, "order_code": "TGSA1B2C3D4", "network": "Binance Pay", "token": "USDT", "receiver_id": "1158594960", "amount_usdt": "4.00", "qty": 1, "amount_vnd": 100000, "expires_at": "2026-11-13T15:40:00.000Z", "expect": {"amount_usdt": "4.00"}}
+    },
+    "bad_replies": {
+      "plisio": [
+        {"why": "amount_vnd differs", "body": {"success": true, "order_code": "TGSA1B2C3D4", "amount_vnd": 99999, "amount_usdt": 4, "expires_at": "2026-11-13T15:40:00.000Z", "invoice_url": "https://plisio.net/invoice/x"}},
+        {"why": "invoice on another host", "body": {"success": true, "order_code": "TGSA1B2C3D4", "amount_vnd": 100000, "amount_usdt": 4, "expires_at": "2026-11-13T15:40:00.000Z", "invoice_url": "https://evil.example/invoice/x"}},
+        {"why": "wrong order code", "body": {"success": true, "order_code": "TGSOTHER", "amount_vnd": 100000, "amount_usdt": 4, "expires_at": "2026-11-13T15:40:00.000Z", "invoice_url": "https://plisio.net/invoice/x"}}
+      ],
+      "bep20": [
+        {"why": "amount_usdt is a number, bep20 needs a d.dd string", "body": {"success": true, "order_code": "TGSA1B2C3D4", "network": "BSC (BEP20)", "token": "USDT", "address": "0x1111111111111111111111111111111111111111", "amount_usdt": 4, "amount_vnd": 100000, "expires_at": "2026-11-13T15:40:00.000Z", "min_confirmations": 3}},
+        {"why": "bad address", "body": {"success": true, "order_code": "TGSA1B2C3D4", "network": "BSC (BEP20)", "token": "USDT", "address": "0x123", "amount_usdt": "4.01", "amount_vnd": 100000, "expires_at": "2026-11-13T15:40:00.000Z", "min_confirmations": 3}}
+      ],
+      "binance": [
+        {"why": "receiver_id is a number", "body": {"success": true, "order_code": "TGSA1B2C3D4", "network": "Binance Pay", "token": "USDT", "receiver_id": 1158594960, "amount_usdt": "4.00", "amount_vnd": 100000, "expires_at": "2026-11-13T15:40:00.000Z"}}
+      ]
+    },
+    "errors": [
+      {"status": 400, "body": {"error": "invalid_amount", "min_vnd": 20000, "max_vnd": 2000000}, "expect": "web_refused"},
+      {"status": 400, "body": {"error": "wallet_topup_disabled"}, "expect": "web_refused"},
+      {"status": 401, "body": {"error": "Unauthorized"}, "expect": "web_refused"},
+      {"status": 429, "body": {"error": "too_many_pending_orders"}, "expect": "too_many_pending"},
+      {"status": 429, "body": {}, "expect": "web_unavailable"},
+      {"status": 502, "body": {"error": "invoice_creation_failed", "provider_code": "106", "provider_http_status": 400, "minimum_exclusive": 0.5, "minimum_currency": "USDT_TRX"}, "expect": "usdt_minimum"},
+      {"status": 502, "body": {"error": "invoice_creation_failed"}, "expect": "web_unavailable"},
+      {"status": 503, "body": {"error": "wallet_topup_rate_unavailable"}, "expect": "web_unavailable"},
+      {"status": 0, "body": {}, "expect": "web_unavailable"},
+      {"status": 408, "body": {}, "expect": "web_unavailable"}
+    ]
+  },
+  "wallet_paid": {
+    "order": {"order_id": "TGSA1B2C3D4", "user_id": 960002, "user_name": "bot_user", "product_id": "gemini_plus", "quantity": 1, "amount": 20000},
+    "sync_request": {"order_code": "TGSA1B2C3D4", "tg_user_id": 960002, "tg_username": "bot_user", "sku": "gemini_plus", "product_name": "Google AI Plus (400 GB Cloud)", "qty": 1, "amount_vnd": 20000, "currency": "VND", "provider": "sepay"},
+    "paid_request": {"order_code": "TGSA1B2C3D4", "tg_user_id": 960002, "sku": "gemini_plus", "qty": 1, "amount_vnd": 20000},
+    "cases": [
+      {"name": "both ok", "sync": [200, {"success": true, "order_code": "TGSA1B2C3D4"}], "paid": [200, {"success": true, "order_code": "TGSA1B2C3D4", "status": "paid"}], "expect": "ok"},
+      {"name": "paid again (idempotent)", "sync": [200, {"success": true, "order_code": "TGSA1B2C3D4"}], "paid": [200, {"success": true, "order_code": "TGSA1B2C3D4", "status": "delivered"}], "expect": "ok"},
+      {"name": "mismatch 409", "sync": [200, {"success": true}], "paid": [409, {"error": "order_mismatch"}], "expect": "refused"},
+      {"name": "already paid by other 409", "sync": [200, {"success": true}], "paid": [409, {"error": "already_paid_other"}], "expect": "refused"},
+      {"name": "order not found 404", "sync": [200, {"success": true}], "paid": [404, {"error": "order_not_found"}], "expect": "refused"},
+      {"name": "wallet pay disabled 400", "sync": [200, {"success": true}], "paid": [400, {"error": "wallet_pay_disabled"}], "expect": "refused"},
+      {"name": "paid 500", "sync": [200, {"success": true}], "paid": [500, {"error": "wallet_pay_unavailable"}], "expect": "uncertain"},
+      {"name": "paid 429", "sync": [200, {"success": true}], "paid": [429, {}], "expect": "uncertain"},
+      {"name": "sync 400", "sync": [400, {"error": "invalid_amount"}], "paid": null, "expect": "refused"},
+      {"name": "sync 503", "sync": [503, {}], "paid": null, "expect": "uncertain"},
+      {"name": "sync 200 without success", "sync": [200, {}], "paid": null, "expect": "refused"}
+    ]
+  },
+  "wallet_cancel": {
+    "order": {"order_id": "TGSA1B2C3D4", "user_id": 960002},
+    "request": {"order_code": "TGSA1B2C3D4", "tg_user_id": 960002},
+    "cases": [
+      {"name": "cancelled", "reply": [200, {"success": true, "order_code": "TGSA1B2C3D4", "status": "cancelled"}], "expect": "ok"},
+      {"name": "already delivered", "reply": [409, {"error": "already_delivered"}], "expect": "already_delivered"},
+      {"name": "other 409", "reply": [409, {"error": "order_not_cancellable"}], "expect": "uncertain"},
+      {"name": "not wallet order 409", "reply": [409, {"error": "not_wallet_order"}], "expect": "uncertain"},
+      {"name": "500", "reply": [500, {"error": "wallet_pay_unavailable"}], "expect": "uncertain"},
+      {"name": "disabled 400", "reply": [400, {"error": "wallet_pay_disabled"}], "expect": "uncertain"}
+    ]
+  },
+  "claim": {
+    "sku": "gemini_plus",
+    "order_id": "TGSA1B2C3D4",
+    "request": {"sku": "gemini_plus", "order_code": "TGSA1B2C3D4"},
+    "cases": [
+      {"name": "delivered", "reply": [200, {"success": true, "id": 1, "sku": "gemini_plus", "content": "https://x/1", "items": [{"id": 1, "content": "https://x/1"}], "remaining": 3}], "expect": ["ok", "https://x/1"]},
+      {"name": "sold out", "reply": [409, {"error": "Insufficient stock for this paid order"}], "expect": ["sold_out", null]},
+      {"name": "not paid", "reply": [409, {"error": "Order payment has not been confirmed"}], "expect": ["uncertain", null]},
+      {"name": "other 409", "reply": [409, {"error": "Order product or quantity does not match"}], "expect": ["uncertain", null]},
+      {"name": "404", "reply": [404, {"error": "Order not found or ambiguous"}], "expect": ["uncertain", null]},
+      {"name": "200 without content", "reply": [200, {"success": true}], "expect": ["uncertain", null]},
+      {"name": "500", "reply": [500, {}], "expect": ["uncertain", null]}
+    ]
+  }
+}
