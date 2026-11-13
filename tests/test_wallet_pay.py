@@ -433,9 +433,10 @@ class FlowTests(Base):
         self.assertEqual(order["item_delivered"], BUNDLE)
 
     def test_only_one_of_two_simultaneous_handlers_pays(self):
+        # Phase 2 is stubbed out so the first order stays "wallet_processing" while the other taps arrive (otherwise a tap that
+        # comes after the first order finished is a legitimate second purchase and the count depends on thread timing).
         async def both():
-            web = FakeWeb()
-            with patch.object(shop_bot, "wallet_web_ops", return_value=web.ops()):
+            with patch.object(shop_bot, "run_wallet_order", new=AsyncMock(return_value=SimpleNamespace(state="processing"))):
                 await asyncio.gather(*[shop_bot.handle_wallet_pay(self.query, self.context, self.user, "vi", "gemini_plus", 1) for _ in range(3)])
 
         asyncio.run(both())
