@@ -65,10 +65,11 @@ class MultiProductTests(unittest.IsolatedAsyncioTestCase):
         plus = [b for b in flat if b.callback_data == "buy_gemini_plus"]
         pro = [b for b in flat if b.callback_data == f"buy_{PRO}"]
         self.assertEqual(len(plus), 1)
-        self.assertIn("MUA GOOGLE AI PLUS 12 THÁNG", plus[0].text)
+        self.assertIn("GOOGLE AI PLUS 12 THÁNG", plus[0].text)
+        self.assertNotIn("MUA", plus[0].text)
         self.assertEqual(len(pro), 1)
         self.assertIn("ACCOUNT GEMINI PRO", pro[0].text)
-        self.assertIn("125,000", pro[0].text)
+        self.assertNotIn("125,000", pro[0].text)  # price no longer on the list button
 
     def test_out_of_stock_product_is_still_listed_but_cannot_be_bought(self):
         with self.stock(plus=10, pro=0):

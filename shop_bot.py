@@ -825,7 +825,11 @@ def generate_crypto_qr_png_bytes(address: str) -> bytes | None:
 
 # ==================== MENU & GIAO DIỆN INLINE (VIP EDITION WITH ANIMATED EMOJIS) ====================
 
+# One custom emoji for the product list (shop title + product buttons). Set here ONLY; everything else refers to the "product" key.
+BOT_ICON_CUSTOM_EMOJI_ID = "5796185041717433060"
+
 VIP_EMOJIS = {
+    "product": BOT_ICON_CUSTOM_EMOJI_ID,  # icon of the shop list (replaces crown / cross on product buttons)
     "crown": "5807868868886009920",      # 👑 Vương miện VIP
     "diamond": "5963312935148195483",    # 💎 Kim cương VIP
     "star": "5874948844935974490",       # ⭐️ Ngôi sao sáng
@@ -861,6 +865,7 @@ VIP_EMOJIS = {
 }
 
 FALLBACK_BUTTON_EMOJIS = {
+    "product": "👑",
     "crown": "👑",
     "diamond": "💎",
     "star": "⭐️",
@@ -903,6 +908,22 @@ def vip_em(name: str, fallback: str = "") -> str:
         # Telegram Bot API nghiêm ngặt yêu cầu nội dung bên trong <tg-emoji> PHẢI là emoji chuẩn đơn.
         return f'<tg-emoji emoji-id="{cid}">{std_emoji}</tg-emoji>'
     return fallback or std_emoji
+
+_TG_EMOJI_TAG_RE = re.compile(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', re.S)
+
+
+def plain_text(text: str) -> str:
+    """Same message with every <tg-emoji> replaced by its ordinary emoji (fallback when Telegram rejects custom emoji)."""
+    return _TG_EMOJI_TAG_RE.sub(r"\1", text)
+
+
+def plain_markup(markup):
+    """Same keyboard without custom-emoji icons (fallback). Only text/callback_data/url are kept, which is all vip_btn sets."""
+    if not isinstance(markup, InlineKeyboardMarkup):
+        return markup
+    return InlineKeyboardMarkup([[InlineKeyboardButton(text=b.text, callback_data=b.callback_data, url=b.url) for b in row]
+                                 for row in markup.inline_keyboard])
+
 
 def strip_button_emojis(text: str) -> str:
     """Loại bỏ các emoji/biểu tượng thừa ở đầu/cuối nhãn để chuẩn hóa chữ gốc"""
@@ -1322,6 +1343,17 @@ async def safe_edit_or_reply(query, text, reply_markup=None, parse_mode="HTML", 
             )
         except Exception as e2:
             logger.error(f"Lỗi gửi tin nhắn fallback: {e2}")
+            # Last resort: Telegram may refuse the custom emoji (tag in the text or icon on a button). Resend with ordinary
+            # emoji so the customer never loses the message (payment/delivery notices go through here too).
+            try:
+                return await query.message.reply_text(
+                    text=plain_text(text),
+                    reply_markup=plain_markup(reply_markup),
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview
+                )
+            except Exception as e3:
+                logger.error(f"Lỗi gửi tin nhắn fallback (emoji thường): {e3}")
 
 ORDERS_PAGE_SIZE = 5
 ORDER_CONTENT_PREVIEW = 600  # Telegram giới hạn 4096 ký tự/tin nhắn; đơn nhiều link được rút gọn khi liệt kê
@@ -1573,7 +1605,7 @@ def main_menu_keyboard(user_id=None, lang: str | None = None):
 
 
 def shop_message(lang: str) -> str:
-    return (f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} {t(lang, 'shop_title')} {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
+    return (f"{vip_em('product', '👑')} ═══════ {vip_em('diamond', '💎')} {t(lang, 'shop_title')} {vip_em('diamond', '💎')} ═══════ {vip_em('product', '👑')}\n\n"
             f"{vip_em('star', '👇')} {t(lang, 'shop_hint')}")
 
 
@@ -1589,14 +1621,14 @@ def shop_keyboard(user_id=None, lang: str | None = None):
         label = (product_content.short_name(sku, lang) or (str(row["name"]) if row else sku))[:40]
         if sku_is_in_stock(sku):
             if sku == DEFAULT_SKU:
-                text = t(lang, "btn_product_buy", name=label, price=i18n.fmt_vnd(price), stock=get_stock_count(sku))
+                text = t(lang, "btn_product_buy", name=label, stock=get_stock_count(sku))
             else:
-                text = t(lang, "btn_product_buy_nostock", name=label, price=i18n.fmt_vnd(price))
-            keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="crown", style="primary")])
+                text = t(lang, "btn_product_buy_nostock", name=label)
+            keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="product", style="primary")])
         else:
             # gemini_plus keeps opening its own page (which says sold out), as before; others show a sold-out alert.
             cb = cb_buy(sku) if sku == DEFAULT_SKU else f"soldout_{sku}"
-            keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label, price=i18n.fmt_vnd(price)), callback_data=cb, emoji_name="cross")])
+            keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label), callback_data=cb, emoji_name="product")])
     keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
     return InlineKeyboardMarkup(keyboard)
 

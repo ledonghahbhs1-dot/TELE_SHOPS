@@ -340,9 +340,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "shop_empty": {"vi": "Hiện chưa có sản phẩm nào đang mở bán.", "en": "No products are on sale right now."},
 
     # ---------- Nút sản phẩm ----------
-    "btn_product_buy": {"vi": "MUA {name} • {price} (Kho: {stock})", "en": "BUY {name} • {price} (Stock: {stock})"},
-    "btn_product_buy_nostock": {"vi": "MUA {name} • {price}", "en": "BUY {name} • {price}"},
-    "btn_product_oos": {"vi": "{name} • {price} • HẾT HÀNG", "en": "{name} • {price} • OUT OF STOCK"},
+    # Product list buttons: no "MUA"/"BUY" prefix and no price (the price is shown on the product page and at checkout).
+    "btn_product_buy": {"vi": "{name} (Kho: {stock})", "en": "{name} (Stock: {stock})"},
+    "btn_product_buy_nostock": {"vi": "{name}", "en": "{name}"},
+    "btn_product_oos": {"vi": "{name} • HẾT HÀNG", "en": "{name} • OUT OF STOCK"},
     "soldout_alert": {
         "vi": "Sản phẩm này hiện đã hết hàng. Vui lòng quay lại sau!",
         "en": "This product is out of stock. Please check back later!",
