@@ -2419,12 +2419,27 @@ def _wallet_web_mark_paid(order) -> str:
     return wallet_pay.WEB_REFUSED
 
 
+def _wallet_web_cancel(order) -> str:
+    """Báo web đóng đơn ví đã hoàn tiền (route bot-only /api/tg/orders/wallet-cancel). Lỗi mạng/không rõ: bỏ qua, KHÔNG chặn hoàn tiền."""
+    try:
+        status, body = _post_web_json("/api/tg/orders/wallet-cancel",
+                                      {"order_code": order["order_id"], "tg_user_id": int(order["user_id"])})
+    except Exception:
+        return wallet_pay.WEB_UNCERTAIN
+    if status == 200 and body.get("success") is True:
+        return wallet_pay.WEB_OK
+    if status == 409 and body.get("error") == "already_delivered":
+        return wallet_pay.WEB_DELIVERED
+    return wallet_pay.WEB_UNCERTAIN
+
+
 def _wallet_finish(order_id: str, user_id: int, bundle: str):
     return deliver_product(order_id, user_id, bundle=bundle)
 
 
 def wallet_web_ops() -> "wallet_pay.WebOps":
-    return wallet_pay.WebOps(mark_paid=_wallet_web_mark_paid, claim=claim_stock_detailed, finish=_wallet_finish)
+    return wallet_pay.WebOps(mark_paid=_wallet_web_mark_paid, claim=claim_stock_detailed, finish=_wallet_finish,
+                             cancel=_wallet_web_cancel)
 
 
 def _process_wallet_order_sync(order_id: str):

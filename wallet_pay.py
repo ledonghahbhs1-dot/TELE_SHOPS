@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import secrets
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -36,6 +36,7 @@ _TS = "%Y-%m-%d %H:%M:%S"
 
 # Results of the injected web operations.
 WEB_OK, WEB_REFUSED, WEB_SOLD_OUT, WEB_UNCERTAIN = "ok", "refused", "sold_out", "uncertain"
+WEB_DELIVERED = "already_delivered"      # wallet-cancel answer: the web already handed the goods over
 
 INFLIGHT_INDEX = ("CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_inflight ON orders(user_id) "
                   "WHERE payment_method = 'wallet' AND status = 'wallet_processing'")
@@ -55,10 +56,13 @@ class WebOps:
     mark_paid(order_row) -> WEB_OK | WEB_REFUSED | WEB_UNCERTAIN   (sync the order, tell the web it is paid by wallet)
     claim(sku, order_id) -> (WEB_OK, bundle_text) | (WEB_SOLD_OUT | WEB_REFUSED | WEB_UNCERTAIN, None)
     finish(order_id, user_id, bundle_text) -> list[str] | None     (store the links on the order, mark it completed)
+    cancel(order_row) -> WEB_OK | WEB_DELIVERED | anything else    (optional: tell the web the refunded order must never be
+                                                                    delivered; errors are ignored, they never block a refund)
     """
     mark_paid: Callable
     claim: Callable
     finish: Callable
+    cancel: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +149,21 @@ def _refund(conn, order, review_reason: str) -> ProcessResult:
     return ProcessResult(state, order_id, user_id, amount, result.balance_vnd)
 
 
+def _refund_and_cancel(conn, order, review_reason: str, web: WebOps, web_may_know: bool) -> ProcessResult:
+    """Refund locally (the money never waits for the web), then best-effort tell the web to close the order. If the web says
+    it already delivered, the customer got both the goods and the refund: flag it for the admin."""
+    result = _refund(conn, order, review_reason)
+    if web.cancel is None or not web_may_know:
+        return result
+    try:
+        outcome = web.cancel(order)
+    except Exception:
+        return result
+    if outcome == WEB_DELIVERED and result.state == "refunded":
+        return replace(result, state="refunded_review")
+    return result
+
+
 def process_order(conn: sqlite3.Connection, order_id: str, web: WebOps, *, now: datetime | None = None) -> ProcessResult:
     """Phase 2. Safe to call any number of times for the same order (restart, button, sweep): it never debits again, never
     refunds twice and never delivers twice. The caller must not run two of these for the same order at once."""
@@ -162,6 +181,7 @@ def process_order(conn: sqlite3.Connection, order_id: str, web: WebOps, *, now: 
 
     now = now or datetime.now()
     outcome = web.mark_paid(order)
+    web_may_know = outcome != WEB_REFUSED       # a refused payment was never recorded on the web: nothing to cancel there
     bundle = None
     if outcome == WEB_OK:
         outcome, bundle = web.claim(str(order["product_id"]), order_id)
@@ -171,14 +191,14 @@ def process_order(conn: sqlite3.Connection, order_id: str, web: WebOps, *, now: 
             return ProcessResult("completed", links=tuple(links), **base)
         outcome = WEB_UNCERTAIN              # bundle did not match the order: let the admin decide after the wait
     if outcome in (WEB_SOLD_OUT, WEB_REFUSED):
-        return _refund(conn, order, REVIEW_REFUND)
+        return _refund_and_cancel(conn, order, REVIEW_REFUND, web, web_may_know)
     # Uncertain: the web may already have delivered, so wait; refund + admin review only after the grace period.
     try:
         started = datetime.strptime(str(order["created_at"]), _TS)
     except (TypeError, ValueError):
         started = now - timedelta(minutes=UNCERTAIN_REFUND_MINUTES)
     if now - started >= timedelta(minutes=UNCERTAIN_REFUND_MINUTES):
-        return _refund(conn, order, REVIEW_REFUND_UNSURE)
+        return _refund_and_cancel(conn, order, REVIEW_REFUND_UNSURE, web, web_may_know)
     return ProcessResult("processing", **base)
 
 
