@@ -832,8 +832,8 @@ BOT_ICON_CUSTOM_EMOJI_ID = CHATGPT_ICON_CUSTOM_EMOJI_ID  # kept name from task 0
 BOT_PRODUCT_ICON = {
     "chatgpt_go_3m": CHATGPT_ICON_CUSTOM_EMOJI_ID,
 }
-# Google logo id: leave empty until Goof sends it. When set, applies to every SKU in GOOGLE_SKUS; empty = default crown/cross.
-GOOGLE_ICON_CUSTOM_EMOJI_ID = ""
+# Google logo id (from Goof, task 069). Applies to every SKU in GOOGLE_SKUS; empty = default crown/cross (e.g. to disable).
+GOOGLE_ICON_CUSTOM_EMOJI_ID = "5796314805564346672"
 GOOGLE_SKUS = ("gemini_plus", "gemini_pro_account")
 
 VIP_EMOJIS = {
