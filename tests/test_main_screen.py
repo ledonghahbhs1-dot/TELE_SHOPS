@@ -140,11 +140,11 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts(markup), ["Mua hàng", "Đơn đã mua", "Hỗ trợ", "Ngôn ngữ: Tiếng Việt"])
         self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"soldout_{GPT}", "main_menu"])
         labels = texts(shop)
-        self.assertEqual(labels[0], "MUA GOOGLE AI PLUS 12 THÁNG • %s VNĐ (Kho: 294)" % f"{shop_bot.get_product(PLUS)['price']:,}")
+        self.assertEqual(labels[0], "GOOGLE AI PLUS 12 THÁNG (Kho: 294)")
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", labels[1])
-        self.assertIn("125,000", labels[1])
+        self.assertNotIn("125,000", labels[1])
         self.assertIn("CHATGPT GO 3 THÁNG", labels[2])
-        self.assertIn("100,000 VNĐ", labels[2])
+        self.assertNotIn("100,000", labels[2])
         self.assertIn("HẾT HÀNG", labels[2])
         self.assertFalse([t for t in labels if "Cẩm Nang" in t or "Hướng Dẫn" in t])
 
@@ -156,13 +156,13 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
             shop = shop_bot.shop_keyboard(1)
         self.assertEqual(datas(markup), ["shop", "my_orders", "support", "lang_menu"])
         self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{NEW}", f"soldout_{GPT}", "main_menu"])
-        self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" in t for t in texts(shop)))
+        self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" not in t for t in texts(shop)))
 
     async def test_out_of_stock_products_are_labelled_sold_out(self):
         with self.stock(plus=0, pro=0):
             markup = shop_bot.shop_keyboard(1)
         labels, callbacks = texts(markup), datas(markup)
-        self.assertIn("GOOGLE AI PLUS 12 THÁNG • %s VNĐ • HẾT HÀNG" % f"{shop_bot.get_product(PLUS)['price']:,}", labels)
+        self.assertIn("GOOGLE AI PLUS 12 THÁNG • HẾT HÀNG", labels)
         self.assertIn("buy_gemini_plus", callbacks)  # opens the intro, which says it is sold out
         self.assertIn(f"soldout_{PRO}", callbacks)
         self.assertTrue(any("HẾT HÀNG" in t and "GEMINI PRO" in t for t in labels))

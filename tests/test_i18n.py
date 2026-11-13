@@ -296,11 +296,12 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
                 markup = shop_bot.shop_keyboard(555)
                 self.assertEqual(datas(markup), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{GPT}", "main_menu"])
                 labels = texts(markup)
-                self.assertTrue(labels[0].startswith(f"{buy} GOOGLE AI PLUS 12 "), labels[0])
-                self.assertIn("14,999 VNĐ", labels[0])
+                self.assertTrue(labels[0].startswith("GOOGLE AI PLUS 12 "), labels[0])
+                self.assertFalse(labels[0].upper().startswith(buy), labels[0])
+                self.assertNotIn("14,999", labels[0])
                 self.assertIn("293", labels[0])
                 self.assertIn(name, labels[2])
-                self.assertIn("100,000 VNĐ", labels[2])
+                self.assertNotIn("100,000", labels[2])
 
     async def test_language_switch_via_callbacks_persists_and_rerenders_menu(self):
         _, render = await self.click("lang_menu")
@@ -457,7 +458,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
         with web(item(PLUS, price=14999)), self.stock(**{PLUS: 5}):
             shop_bot.refresh_catalogue(force=True)
             markup = shop_bot.shop_keyboard(555)
-            self.assertIn("100,000 VNĐ", [txt for txt in texts(markup) if "CHATGPT" in txt][0])
+            self.assertNotIn("100,000", [txt for txt in texts(markup) if "CHATGPT" in txt][0])
             self.assertIn("OUT OF STOCK", [txt for txt in texts(markup) if "CHATGPT" in txt][0])
             _, render = await self.click(f"buy_{GPT}")
             body = plain(render.await_args.args[1])

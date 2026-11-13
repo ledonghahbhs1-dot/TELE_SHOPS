@@ -1,0 +1,143 @@
+"""Task 067: bot UI - one custom icon constant, no "MUA" and no price on product buttons, safe plain-emoji fallback. Offline."""
+import asyncio
+import os
+import re
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+import shop_bot
+
+ICON_ID = "5796185041717433060"
+
+
+def utf16_len(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+class IconConstantTests(unittest.TestCase):
+    def test_single_constant_with_the_requested_id(self):
+        self.assertEqual(shop_bot.BOT_ICON_CUSTOM_EMOJI_ID, ICON_ID)
+        self.assertEqual(shop_bot.VIP_EMOJIS["product"], shop_bot.BOT_ICON_CUSTOM_EMOJI_ID)
+
+    def test_id_is_not_hardcoded_elsewhere_in_the_bot_sources(self):
+        root = Path(shop_bot.__file__).parent
+        hits = [p.name for p in root.glob("*.py") if ICON_ID in p.read_text(encoding="utf-8")]
+        self.assertEqual(hits, ["shop_bot.py"])
+        self.assertEqual(Path(root / "shop_bot.py").read_text(encoding="utf-8").count(f'"{ICON_ID}"'), 1)
+
+    def test_shop_message_uses_the_icon_for_both_crowns(self):
+        text = shop_bot.shop_message("vi")
+        self.assertEqual(text.count(f'<tg-emoji emoji-id="{ICON_ID}">'), 2)
+        self.assertEqual(text.count("👑"), 2)  # only as the replacement glyph inside the tag
+        # The tag body must be exactly one emoji (Telegram rejects otherwise).
+        for body in re.findall(r"<tg-emoji emoji-id=\"%s\">(.*?)</tg-emoji>" % ICON_ID, text):
+            self.assertEqual(body, "👑")
+
+    def test_entity_offsets_would_be_utf16_correct(self):
+        # Messages use <tg-emoji> HTML, so Telegram computes entity offsets. This checks the plain text left after the
+        # tags are stripped: a custom_emoji entity for the first crown starts at offset 0 and is 2 UTF-16 units long.
+        plain = shop_bot.plain_text(shop_bot.shop_message("vi"))
+        self.assertTrue(plain.startswith("👑"))
+        self.assertEqual(utf16_len("👑"), 2)
+        offset_second = utf16_len(plain[: plain.rindex("👑")])
+        self.assertEqual(plain.encode("utf-16-le")[offset_second * 2: offset_second * 2 + 4].decode("utf-16-le"), "👑")
+
+
+class PlainFallbackTests(unittest.TestCase):
+    def test_plain_text_drops_tags_and_keeps_glyphs(self):
+        src = f'<tg-emoji emoji-id="{ICON_ID}">👑</tg-emoji> <b>Xin chào</b>'
+        self.assertEqual(shop_bot.plain_text(src), "👑 <b>Xin chào</b>")
+
+    def test_plain_markup_drops_icons_keeps_text_and_callbacks(self):
+        markup = InlineKeyboardMarkup([[shop_bot.vip_btn("Sản phẩm", callback_data="buy_x", emoji_name="product", style="primary")],
+                                       [InlineKeyboardButton(text="Link", url="https://example.test")]])
+        self.assertIn("icon_custom_emoji_id", (markup.inline_keyboard[0][0].api_kwargs or {}))
+        plain = shop_bot.plain_markup(markup)
+        self.assertEqual([[b.text for b in row] for row in plain.inline_keyboard], [["Sản phẩm"], ["Link"]])
+        self.assertEqual(plain.inline_keyboard[0][0].callback_data, "buy_x")
+        self.assertEqual(plain.inline_keyboard[1][0].url, "https://example.test")
+        self.assertFalse(any(b.api_kwargs for row in plain.inline_keyboard for b in row))
+
+    def test_plain_markup_passes_none_through(self):
+        self.assertIsNone(shop_bot.plain_markup(None))
+
+
+class SafeEditFallbackTests(unittest.IsolatedAsyncioTestCase):
+    def query(self, reply_side_effect):
+        query = MagicMock()
+        query.message.photo = None
+        query.edit_message_text = AsyncMock(side_effect=Exception("Bad Request: custom emoji"))
+        query.message.reply_text = AsyncMock(side_effect=reply_side_effect)
+        return query
+
+    async def test_resends_plain_version_when_telegram_rejects_the_custom_emoji(self):
+        text = f'<tg-emoji emoji-id="{ICON_ID}">👑</tg-emoji> Đơn hàng'
+        markup = InlineKeyboardMarkup([[shop_bot.vip_btn("Đơn", callback_data="my_orders", emoji_name="product")]])
+        query = self.query([Exception("custom emoji refused"), "sent"])
+        result = await shop_bot.safe_edit_or_reply(query, text, reply_markup=markup)
+        self.assertEqual(result, "sent")
+        calls = query.message.reply_text.await_args_list
+        self.assertEqual(len(calls), 2)
+        last = calls[-1].kwargs
+        self.assertNotIn("tg-emoji", last["text"])
+        self.assertEqual(last["text"], "👑 Đơn hàng")
+        self.assertFalse(any(b.api_kwargs for row in last["reply_markup"].inline_keyboard for b in row))
+        self.assertEqual(last["reply_markup"].inline_keyboard[0][0].callback_data, "my_orders")
+
+    async def test_normal_path_keeps_the_custom_emoji(self):
+        text = f'<tg-emoji emoji-id="{ICON_ID}">👑</tg-emoji> ok'
+        query = MagicMock()
+        query.message.photo = None
+        query.edit_message_text = AsyncMock(return_value="edited")
+        result = await shop_bot.safe_edit_or_reply(query, text)
+        self.assertEqual(result, "edited")
+        self.assertIn(ICON_ID, query.edit_message_text.await_args.kwargs["text"])
+
+
+class ShopButtonTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        settings = patch.multiple(shop_bot, DATA_DIR=self.directory.name, DB_PATH=str(Path(self.directory.name) / "shop.db"),
+                                  CLAIMED_LINKS_FILE=str(Path(self.directory.name) / "c.txt"), BOT_TOKEN="test-token")
+        settings.start()
+        self.addCleanup(settings.stop)
+        shop_bot.init_database()
+
+    def keyboard(self, stock):
+        with patch.object(shop_bot, "get_stock_count", side_effect=lambda sku="gemini_plus": stock.get(sku, 0)), \
+                patch.object(shop_bot, "sku_price_vnd", return_value=125_000), \
+                patch.object(shop_bot, "sku_is_in_stock", side_effect=lambda sku: stock.get(sku, 0) > 0):
+            return shop_bot.shop_keyboard(1, "vi")
+
+    def test_buttons_have_no_mua_and_no_price_and_carry_the_icon(self):
+        keyboard = self.keyboard({"gemini_plus": 290})
+        product_buttons = [b for row in keyboard.inline_keyboard for b in row if b.callback_data != "main_menu"]
+        self.assertTrue(product_buttons)
+        for button in product_buttons:
+            self.assertFalse(button.text.upper().startswith("MUA"), button.text)
+            self.assertNotRegex(button.text, r"\d[\d.,]*\s*(VNĐ|VND|đ)", button.text)
+            self.assertNotIn("•", button.text.replace("• HẾT HÀNG", ""))
+            self.assertEqual(button.api_kwargs.get("icon_custom_emoji_id"), ICON_ID)
+        self.assertEqual(product_buttons[0].text, "GOOGLE AI PLUS 12 THÁNG (Kho: 290)")
+
+    def test_out_of_stock_shows_het_hang_without_price(self):
+        keyboard = self.keyboard({})
+        texts = [b.text for row in keyboard.inline_keyboard for b in row]
+        self.assertTrue(any(t.endswith("• HẾT HÀNG") for t in texts), texts)
+        self.assertFalse(any("VNĐ" in t or "VND" in t for t in texts))
+
+    def test_english_labels_follow_the_same_rule(self):
+        keyboard = self.keyboard({"gemini_plus": 5})
+        first = keyboard.inline_keyboard[0][0]
+        self.assertFalse(first.text.upper().startswith("BUY"))
+        self.assertIn("(Stock: 5)", shop_bot.t("en", "btn_product_buy", name="X", stock=5))
+        self.assertEqual(shop_bot.t("en", "btn_product_oos", name="X"), "X • OUT OF STOCK")
+
+
+if __name__ == "__main__":
+    unittest.main()

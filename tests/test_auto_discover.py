@@ -79,7 +79,7 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(shop_bot.refresh_catalogue(force=True))
             keyboard = shop_bot.shop_keyboard(1)
         self.assertIn(f"buy_{NEW}", datas(keyboard))
-        self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" in t for t in texts(keyboard)))
+        self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" not in t for t in texts(keyboard)))
         self.assertEqual(datas(keyboard)[0], "buy_gemini_plus")
 
     def test_name_price_description_and_max_qty_come_from_web(self):
@@ -264,7 +264,8 @@ class AutoDiscoverTests(unittest.IsolatedAsyncioTestCase):
             keyboard = shop_bot.shop_keyboard(1)
         first = keyboard.inline_keyboard[0][0]
         self.assertEqual(first.callback_data, "buy_gemini_plus")
-        self.assertIn("MUA GOOGLE AI PLUS 12 THÁNG", first.text)
+        self.assertIn("GOOGLE AI PLUS 12 THÁNG", first.text)
+        self.assertNotIn("MUA", first.text)
         self.assertEqual(shop_bot.sku_display_name(PLUS), "Google AI Plus (400 GB Cloud)")
 
     def test_gemini_plus_stays_available_when_web_omits_it(self):
