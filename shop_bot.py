@@ -2002,6 +2002,15 @@ def binance_reply(lang, result) -> str:
     return t(lang, f"binance_reply_{result if result in _BINANCE_REPLY_KEYS else 'rejected'}")
 
 
+def _is_topup_order(order_id: str, user_id: int) -> bool:
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT kind FROM orders WHERE order_id = ? AND user_id = ?", (order_id, user_id)).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row["kind"] == "wallet_topup")
+
+
 async def handle_binance_id_message(update, context) -> bool:
     """Trả True nếu tin nhắn đã được xử lý như một ID lệnh Binance Pay."""
     import time
@@ -2027,6 +2036,10 @@ async def handle_binance_id_message(update, context) -> bool:
     result = outcome["result"]
     if result == "paid":
         AWAITING_BINANCE_ID.pop(user.id, None)
+        topup = await asyncio.to_thread(_is_topup_order, order_id, user.id)
+        if topup:
+            await settle_and_notify_topup(context.bot, order_id, user.id, {"status": "paid"})
+            return True
         if await send_paid_order_delivery(context.bot, order_id, user.id):
             return True
         await update.message.reply_text(t(lang, "binance_paid_not_delivered", check=vip_em('check', '✅'), order=order_id))
@@ -2137,8 +2150,112 @@ def build_topup_bill(lang: str, order) -> str:
                              order.bank_account, order.bank_owner, expires_display)
 
 
-async def send_topup_invoice(message, user, amount: int, lang: str) -> None:
+_TOPUP_METHOD_CB = re.compile(r"wtm:(vq|pl|bp|bn):(\d{1,9})")
+_TOPUP_METHOD_CODES = {"vq": "vietqr", "pl": "plisio", "bp": "bep20", "bn": "binance"}
+
+
+def topup_usdt_enabled() -> bool:
+    """Nạp bằng USDT: cần nạp ví bật VÀ WALLET_TOPUP_USDT_ENABLED=1 (mặc định TẮT; web phải đặt sẵn tỷ giá nạp USDT)."""
+    return wallet_topup.usdt_flag_on() and topup_enabled()
+
+
+def topup_methods() -> list[str]:
+    """Phương thức nạp đang mở. VietQR luôn có; USDT chỉ khi bật, mỗi phương thức còn cần cờ riêng như khi mua hàng."""
+    methods = ["vietqr"]
+    if topup_usdt_enabled():
+        methods.append("plisio")
+        if bep20_enabled():
+            methods.append("bep20")
+        if binance_pay_enabled():
+            methods.append("binance")
+    return methods
+
+
+def build_topup_method_menu(lang: str, amount: int):
+    codes = {v: k for k, v in _TOPUP_METHOD_CODES.items()}
+    labels = {"vietqr": "btn_topup_m_vietqr", "plisio": "btn_topup_m_plisio", "bep20": "btn_topup_m_bep20", "binance": "btn_topup_m_binance"}
+    rows = [[vip_btn(t(lang, labels[m]), callback_data=f"wtm:{codes[m]}:{amount}", emoji_name="usdt" if m != "vietqr" else "card")]
+            for m in topup_methods()]
+    rows.append([vip_btn(t(lang, "btn_back_main"), callback_data="wtop", emoji_name="back")])
+    return t(lang, "topup_method_menu", amount=i18n.fmt_vnd(amount)), InlineKeyboardMarkup(rows)
+
+
+async def start_topup(message, user, amount: int, lang: str) -> None:
+    """Sau khi khách chọn số tiền: chỉ có VietQR -> tạo luôn (như cũ); có thêm USDT -> cho chọn phương thức trước."""
+    if len(topup_methods()) == 1:
+        await send_topup_invoice(message, user, amount, lang)
+        return
+    if not wallet_store.MIN_TOPUP_VND <= amount <= wallet_store.MAX_TOPUP_VND:
+        await send_topup_invoice(message, user, amount, lang)        # báo lỗi số tiền như cũ
+        return
+    text, markup = build_topup_method_menu(lang, amount)
+    await message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+
+
+def render_usdt_topup_invoice(lang: str, order) -> str:
+    key = {"plisio": "topup_usdt_plisio", "bep20": "topup_usdt_bep20", "binance": "topup_usdt_binance"}[order.method]
+    return t(lang, key, order=html.escape(order.order_id), vnd=i18n.fmt_vnd(order.amount_vnd), usdt=html.escape(order.amount_usdt),
+             deadline=order.expires_at[11:], address=html.escape(order.address or ""), receiver=html.escape(order.receiver_id or ""),
+             confirmations=order.min_confirmations or 0, shield=vip_em('shield', '⚠️'), money=vip_em('money', '💰'),
+             card=vip_em('card', '💳'), calendar=vip_em('calendar', '⏳'))
+
+
+async def send_usdt_topup_invoice(message, user, amount: int, lang: str, method: str) -> None:
+    """Tạo đơn nạp USDT (hoá đơn do WEB tạo và định giá) rồi mới hiện thanh toán. Lỗi -> báo, KHÔNG hiện thanh toán, không để đơn treo."""
+    def create():
+        conn = get_db_connection()
+        try:
+            return wallet_topup.create_usdt_order(conn, user.id, user.username or user.first_name, amount, method,
+                                                  post_web=_post_web_json)
+        finally:
+            conn.close()
+
+    back = _wallet_back_markup(lang, "wtop")
+    try:
+        order = await asyncio.to_thread(create)
+    except wallet_topup.TopupError as error:
+        key = {"invalid_amount": "topup_err_amount", "balance_cap": "topup_err_cap", "too_many_pending": "topup_err_pending",
+               "usdt_minimum": "topup_err_usdt_minimum"}.get(error.code, "topup_err_unavailable")
+        await message.reply_text(
+            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
+                                          cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
+            reply_markup=back, parse_mode="HTML")
+        return
+    except Exception as error:
+        logger.error("Nạp ví USDT: lỗi tạo đơn: %s", type(error).__name__)
+        await message.reply_text(f"{vip_em('cross', '❌')} " + t(lang, "topup_err_unavailable"), reply_markup=back, parse_mode="HTML")
+        return
+    text = render_usdt_topup_invoice(lang, order)
+    if order.method == "plisio":
+        buttons = [[vip_btn(t(lang, "btn_pay_plisio"), url=order.invoice_url, emoji_name="usdt", style="success")],
+                   [vip_btn(t(lang, "btn_check_paid"), callback_data=f"confirm_pay_{order.order_id}", emoji_name="check", style="primary")]]
+    elif order.method == "bep20":
+        buttons = [[vip_btn(t(lang, "btn_bep20_check"), callback_data=f"confirm_pay_{order.order_id}", emoji_name="check", style="primary")]]
+    else:
+        buttons = [[vip_btn(t(lang, "btn_binance_paste"), callback_data=f"bpid_{order.order_id}", emoji_name="check", style="primary")]]
+    buttons.append([vip_btn(t(lang, "btn_back_main"), callback_data="wallet", emoji_name="back")])
+    markup = InlineKeyboardMarkup(buttons)
+    if order.method == "bep20":
+        qr_bytes = generate_crypto_qr_png_bytes(order.address)   # QR của địa chỉ ví thuần, sinh cục bộ
+        if qr_bytes:
+            try:
+                bio = io.BytesIO(qr_bytes)
+                bio.name = f"{order.order_id}.png"
+                if _plain_len(text) <= 1000:
+                    await message.reply_photo(photo=bio, caption=text, reply_markup=markup, parse_mode="HTML")
+                    return
+                await message.reply_photo(photo=bio)
+            except Exception as error:
+                logger.warning("Nạp ví USDT: lỗi gửi QR: %s", type(error).__name__)
+    await message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+
+
+async def send_topup_invoice(message, user, amount: int, lang: str, method: str = "vietqr") -> None:
     """Tạo đơn nạp (đã đồng bộ lên web) rồi mới gửi QR. Lỗi/giới hạn -> báo thân thiện, KHÔNG hiện QR."""
+    if method != "vietqr":
+        await send_usdt_topup_invoice(message, user, amount, lang, method)
+        return
+
     def create():
         conn = get_db_connection()
         try:
@@ -2185,7 +2302,13 @@ async def send_topup_invoice(message, user, amount: int, lang: str) -> None:
 async def handle_topup_check(query, context, order, lang: str) -> None:
     """Nút "Tôi đã thanh toán" của đơn nạp: hỏi web rồi cộng ví qua settle (idempotent). Không bao giờ giao hàng/kho."""
     order_id = order["order_id"]
-    web_stat = await asyncio.to_thread(check_web_order_status, order_id)
+    web_stat = None
+    if order["payment_method"] == "bep20" and order["status"] == "pending":
+        chain = await asyncio.to_thread(check_web_bep20, order_id, order["user_id"])
+        if chain.get("status") == "needs_review":
+            web_stat = chain
+    if web_stat is None:
+        web_stat = await asyncio.to_thread(check_web_order_status, order_id)
     try:
         result = await asyncio.to_thread(settle_topup_sync, order_id, order["user_id"], web_stat)
     except Exception as error:
@@ -2231,11 +2354,18 @@ async def handle_topup_callback(query, user, lang: str, data: str) -> None:
         await safe_edit_or_reply(
             query, t(lang, "topup_prompt", min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND)),
             reply_markup=_wallet_back_markup(lang, "wtop"), parse_mode="HTML")
+    elif data.startswith("wtm:"):
+        match = _TOPUP_METHOD_CB.fullmatch(data)
+        method = _TOPUP_METHOD_CODES.get(match.group(1)) if match else None
+        if not match or method not in topup_methods():
+            await query.answer(t(lang, "pay_method_disabled"), show_alert=True)
+            return
+        await send_topup_invoice(query.message, user, int(match.group(2)), lang, method)
     else:
         match = _TOPUP_AMOUNT_CB.fullmatch(data)
         if not match:
             return
-        await send_topup_invoice(query.message, user, int(match.group(1)), lang)
+        await start_topup(query.message, user, int(match.group(1)), lang)
 
 
 # ── Trả bằng ví (PR3, mặc định TẮT: WALLET_PAY_ENABLED=1 + ví hợp lệ). Xem wallet_pay.py ─────────────────────────────────
@@ -3033,7 +3163,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")],
             ]), parse_mode="HTML")
 
-    elif data == "wtop" or data == "wtop_c" or data.startswith("wtop_a:"):
+    elif data == "wtop" or data == "wtop_c" or data.startswith("wtop_a:") or data.startswith("wtm:"):
         await handle_topup_callback(query, user, lang, data)
 
     elif data == "wallet":
@@ -3504,7 +3634,7 @@ async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT
         if not topup_enabled() or not _is_private_chat(update.message):
             await update.message.reply_text(f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}", parse_mode="HTML")
             return
-        await send_topup_invoice(update.message, user, amount, lang)
+        await start_topup(update.message, user, amount, lang)
         return
 
     # Nếu người dùng đang trong luồng nhập số lượng tùy chỉnh
@@ -3566,6 +3696,11 @@ async def auto_deliver_paid_orders_task(application: Application):
                 await asyncio.sleep(8)
                 if row["kind"] == "wallet_topup":
                     # Nạp ví: không bao giờ giao hàng/kho; chỉ cộng ví qua settle (kể cả đơn đã hủy/hết hạn mà web báo paid).
+                    if row["status"] == "pending" and row["payment_method"] == "bep20":
+                        chain = await asyncio.to_thread(check_web_bep20, row["order_id"], row["user_id"])
+                        if chain.get("status") == "needs_review":
+                            await settle_and_notify_topup(application.bot, row["order_id"], row["user_id"], chain)
+                            continue
                     stat = await asyncio.to_thread(check_web_order_status, row["order_id"])
                     await settle_and_notify_topup(application.bot, row["order_id"], row["user_id"], stat)
                     continue

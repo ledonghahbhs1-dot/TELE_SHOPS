@@ -289,6 +289,30 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "wpay_cancelled_alert": {"vi": "Đơn này đã được hoàn tiền vào ví.", "en": "This order was refunded to your wallet."},
     "wpay_wait_alert": {"vi": "Đơn đang được xử lý, vui lòng thử lại sau ít phút.", "en": "The order is still being processed, please try again in a few minutes."},
+    "btn_topup_m_vietqr": {"vi": "VietQR (chuyển khoản ngân hàng)", "en": "VietQR (bank transfer)"},
+    "btn_topup_m_plisio": {"vi": "USDT qua Plisio", "en": "USDT via Plisio"},
+    "btn_topup_m_bep20": {"vi": "USDT BEP20 (chuyển ví)", "en": "USDT BEP20 (wallet transfer)"},
+    "btn_topup_m_binance": {"vi": "USDT qua Binance Pay", "en": "USDT via Binance Pay"},
+    "topup_method_menu": {
+        "vi": "<b>Nạp {amount} vào ví</b>\n\nChọn phương thức thanh toán. Với USDT, số USDT cần trả do hệ thống tính và hiển thị ở bước sau.",
+        "en": "<b>Top up {amount}</b>\n\nChoose a payment method. For USDT, the exact USDT amount to pay is calculated by the system and shown in the next step.",
+    },
+    "topup_err_usdt_minimum": {
+        "vi": "Số tiền này nhỏ hơn mức tối thiểu của cổng USDT. Hãy chọn số lớn hơn hoặc dùng VietQR.",
+        "en": "This amount is below the minimum of the USDT gateway. Please pick a larger amount or use VietQR.",
+    },
+    "topup_usdt_plisio": {
+        "vi": "{money} <b>Nạp ví qua USDT (Plisio)</b>\n\nMã đơn: <code>{order}</code>\nCộng vào ví: <b>{vnd}</b>\nCần trả: <b>{usdt} USDT</b>\n{calendar} Hạn: <code>{deadline}</code>\n\nBấm \"Thanh toán\" để mở trang Plisio, trả xong bấm kiểm tra. Ví chỉ được cộng khi thanh toán được xác nhận.",
+        "en": "{money} <b>Wallet top-up via USDT (Plisio)</b>\n\nOrder: <code>{order}</code>\nCredited to your wallet: <b>{vnd}</b>\nYou pay: <b>{usdt} USDT</b>\n{calendar} Deadline: <code>{deadline}</code>\n\nTap \"Pay\" to open the Plisio page, then tap check when done. The wallet is credited only after the payment is confirmed.",
+    },
+    "topup_usdt_bep20": {
+        "vi": "{money} <b>Nạp ví qua USDT BEP20</b>\n\nMã đơn: <code>{order}</code>\nCộng vào ví: <b>{vnd}</b>\nSố tiền CHÍNH XÁC: <code>{usdt}</code> USDT (mạng BNB Smart Chain)\nĐịa chỉ ví nhận:\n<code>{address}</code>\n{calendar} Hạn: <code>{deadline}</code>\n\n{shield} Chuyển đúng số tiền (kể cả phần lẻ) và đúng mạng BEP20. Cần {confirmations} xác nhận trên chuỗi; sau đó bấm kiểm tra.",
+        "en": "{money} <b>Wallet top-up via USDT BEP20</b>\n\nOrder: <code>{order}</code>\nCredited to your wallet: <b>{vnd}</b>\nEXACT amount: <code>{usdt}</code> USDT (BNB Smart Chain)\nReceiving address:\n<code>{address}</code>\n{calendar} Deadline: <code>{deadline}</code>\n\n{shield} Send exactly this amount (including decimals) on the BEP20 network. {confirmations} confirmations are needed; then tap check.",
+    },
+    "topup_usdt_binance": {
+        "vi": "{money} <b>Nạp ví qua Binance Pay</b>\n\nMã đơn: <code>{order}</code>\nCộng vào ví: <b>{vnd}</b>\nSố tiền: <code>{usdt}</code> USDT\nBinance Pay ID nhận: <code>{receiver}</code>\n{calendar} Hạn: <code>{deadline}</code>\n\n{shield} Chuyển đúng số tiền bằng Binance Pay, rồi bấm nút bên dưới và dán ID lệnh. Ví chỉ được cộng khi xác minh thành công.",
+        "en": "{money} <b>Wallet top-up via Binance Pay</b>\n\nOrder: <code>{order}</code>\nCredited to your wallet: <b>{vnd}</b>\nAmount: <code>{usdt}</code> USDT\nReceiving Binance Pay ID: <code>{receiver}</code>\n{calendar} Deadline: <code>{deadline}</code>\n\n{shield} Send exactly this amount with Binance Pay, then tap the button below and paste the order ID. The wallet is credited only after verification succeeds.",
+    },
     "wallet_history_empty": {"vi": "Chưa có giao dịch nào.", "en": "No transactions yet."},
     "wallet_kind_topup": {"vi": "Nạp tiền", "en": "Top-up"},
     "wallet_kind_purchase": {"vi": "Mua hàng", "en": "Purchase"},
