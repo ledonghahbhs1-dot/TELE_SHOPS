@@ -49,6 +49,10 @@ class PayError(Exception):
         self.code = code
 
 
+class _NotProcessing(Exception):
+    """Internal: the order left ``wallet_processing`` before the refund could close it."""
+
+
 @dataclass(frozen=True)
 class WebOps:
     """The web side, injected (real implementation lives in shop_bot, tests pass fakes).
@@ -137,10 +141,15 @@ def _refund(conn, order, review_reason: str) -> ProcessResult:
     order_id, user_id, amount = str(order["order_id"]), int(order["user_id"]), int(order["amount"])
 
     def close(tx: sqlite3.Connection) -> None:
-        tx.execute("UPDATE orders SET status = 'cancelled', review_reason = ? WHERE order_id = ? AND status = ?",
-                   (review_reason, order_id, PROCESSING))
+        closed = tx.execute("UPDATE orders SET status = 'cancelled', review_reason = ? WHERE order_id = ? AND status = ?",
+                            (review_reason, order_id, PROCESSING))
+        if closed.rowcount != 1:             # no longer waiting (e.g. completed meanwhile): no refund, the whole transaction rolls back
+            raise _NotProcessing()
 
-    result = wallet_store.refund(conn, user_id, amount, order_id, after=close)
+    try:
+        result = wallet_store.refund(conn, user_id, amount, order_id, after=close)
+    except _NotProcessing:
+        return ProcessResult("closed", order_id, user_id, amount)
     if not result.applied:                   # refunded before: make sure the order is closed as well
         conn.execute("UPDATE orders SET status = 'cancelled', review_reason = COALESCE(review_reason, ?) "
                      "WHERE order_id = ? AND status = ?", (review_reason, order_id, PROCESSING))
