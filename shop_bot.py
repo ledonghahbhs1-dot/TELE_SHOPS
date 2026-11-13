@@ -22,6 +22,7 @@ import product_content
 import product_guides
 import product_intros
 import stock_notify
+import wallet_pay
 import wallet_store
 import wallet_topup
 from i18n import t
@@ -308,6 +309,9 @@ def init_database():
         cursor.execute("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'purchase'")
     except sqlite3.OperationalError:
         pass
+    if wallet_enabled():
+        # Trả bằng ví: cột review_reason + chỉ mục một đơn ví đang xử lý mỗi khách (chống bấm đúp / race).
+        wallet_pay.ensure_schema(conn)
 
     # 4. Bảng cấu hình hệ thống (Settings)
     cursor.execute("""
@@ -596,8 +600,23 @@ def claim_stock_from_web(sku="gemini_plus", order_id="", content=""):
         logger.warning(f"Lỗi claim/đồng bộ link từ web backend: {e}")
     return None
 
-def deliver_product(order_id, user_id):
-    """Xuất link từ kho và gán cho đơn hàng theo đúng số lượng mua"""
+def claim_stock_detailed(sku: str, order_id: str):
+    """Như claim_stock_from_web nhưng phân biệt kết quả cho đơn trả bằng ví:
+    (WEB_OK, nội dung) | (WEB_SOLD_OUT, None) chắc chắn hết hàng | (WEB_UNCERTAIN, None) mọi trường hợp còn lại."""
+    try:
+        status, body = _post_web_json("/api/tg/stock/claim", {"sku": sku, "order_code": order_id}, timeout=15)
+    except Exception:
+        return wallet_pay.WEB_UNCERTAIN, None
+    if status == 200 and body.get("success") is True and isinstance(body.get("content"), str) and body["content"]:
+        return wallet_pay.WEB_OK, body["content"]
+    if status == 409 and "insufficient stock" in str(body.get("error", "")).lower():
+        return wallet_pay.WEB_SOLD_OUT, None
+    return wallet_pay.WEB_UNCERTAIN, None
+
+
+def deliver_product(order_id, user_id, bundle=None):
+    """Xuất link từ kho và gán cho đơn hàng theo đúng số lượng mua.
+    ``bundle``: nội dung web đã giao (chỉ luồng trả bằng ví truyền vào, tránh claim lần hai)."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -613,6 +632,10 @@ def deliver_product(order_id, user_id):
         links = (order["item_delivered"] or "").splitlines()
         conn.close()
         return links or None
+    if order["payment_method"] == "wallet" and bundle is None:
+        # Đơn ví chỉ được giao bởi wallet_pay.process_order (đã trừ tiền, chưa hoàn); đơn đã hoàn không bao giờ được giao.
+        conn.close()
+        return None
 
     qty = 1
     if "quantity" in order.keys() and order["quantity"]:
@@ -622,7 +645,8 @@ def deliver_product(order_id, user_id):
             qty = 1
 
     # The web claims the complete quantity atomically and returns the same bundle on retries.
-    bundle = claim_stock_from_web(order["product_id"], order_id)
+    if bundle is None:
+        bundle = claim_stock_from_web(order["product_id"], order_id)
     delivered_links = bundle.splitlines() if bundle else []
     if len(delivered_links) != qty:
         conn.close()
@@ -931,13 +955,13 @@ def cb_buy(sku: str) -> str:
 
 def cb_qty(kind: str, sku: str, qty: int) -> str:
     """Callback data cho chọn số lượng / tạo đơn. gemini_plus giữ nguyên định dạng cũ."""
-    if kind not in ("bep20", "binance") and sku == DEFAULT_SKU:
+    if kind not in ("bep20", "binance", "wallet") and sku == DEFAULT_SKU:
         return {"select": f"select_qty_{qty}", "vietqr": f"create_order_vietqr_{qty}", "usdt": f"create_order_usdt_{qty}"}[kind]
-    prefix = {"select": "sq", "vietqr": "cv", "usdt": "cu", "bep20": "cb", "binance": "cp"}[kind]
+    prefix = {"select": "sq", "vietqr": "cv", "usdt": "cu", "bep20": "cb", "binance": "cp", "wallet": "wp"}[kind]
     return f"{prefix}:{sku}:{qty}"
 
 
-_SKU_CB_RE = re.compile(r"(sq|cv|cu|cb|cp):([A-Za-z0-9][A-Za-z0-9_]{1,39}):(\d{1,3})")
+_SKU_CB_RE = re.compile(r"(sq|cv|cu|cb|cp|wp):([A-Za-z0-9][A-Za-z0-9_]{1,39}):(\d{1,3})")
 
 
 def parse_sku_qty_callback(data: str):
@@ -1196,6 +1220,17 @@ async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
         [vip_btn(t(lang, "btn_reselect_qty"), callback_data=cb_buy(sku), emoji_name="refresh")],
         [vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")]
     ]
+    if wallet_pay_enabled() and _is_private_chat(getattr(target, "message", target)):
+        # Tùy chọn thêm (mặc định TẮT): trả bằng số dư ví của bot, hiện số dư và đủ/thiếu.
+        try:
+            balance = await asyncio.to_thread(_wallet_balance, getattr(user, "id", 0))
+        except Exception as error:
+            logger.warning("Trả bằng ví: không đọc được số dư: %s", type(error).__name__)
+            balance = None
+        if balance is not None:
+            label = t(lang, "btn_pay_wallet_ok" if balance >= total_vnd else "btn_pay_wallet_short",
+                      balance=i18n.fmt_vnd(balance), missing=i18n.fmt_vnd(max(0, total_vnd - balance)))
+            keyboard.insert(2, [vip_btn(label, callback_data=cb_qty("wallet", sku, qty), emoji_name="wallet")])
     if binance_pay_enabled():
         # Tùy chọn thêm (mặc định TẮT): USDT qua Binance Pay, khách trả đúng giá rồi dán ID lệnh.
         keyboard.insert(2, [vip_btn(t(lang, "btn_pay_binance"), callback_data=cb_qty("binance", sku, qty), emoji_name="usdt")])
@@ -2203,6 +2238,166 @@ async def handle_topup_callback(query, user, lang: str, data: str) -> None:
         await send_topup_invoice(query.message, user, int(match.group(1)), lang)
 
 
+# ── Trả bằng ví (PR3, mặc định TẮT: WALLET_PAY_ENABLED=1 + ví hợp lệ). Xem wallet_pay.py ─────────────────────────────────
+WALLET_PAY_LOCK = asyncio.Lock()
+WALLET_SWEEP_SECONDS = 60
+
+
+def wallet_pay_enabled() -> bool:
+    """Trả bằng ví: cần WALLET_ENABLED hợp lệ (có Volume) VÀ WALLET_PAY_ENABLED=1 (mặc định TẮT)."""
+    return wallet_pay.pay_flag_on() and wallet_enabled()
+
+
+def _wallet_balance(user_id: int) -> int:
+    conn = get_db_connection()
+    try:
+        return wallet_store.get_balance(conn, int(user_id))
+    finally:
+        conn.close()
+
+
+def _wallet_processing_ids() -> list[str]:
+    conn = get_db_connection()
+    try:
+        return wallet_pay.processing_orders(conn)
+    finally:
+        conn.close()
+
+
+def _wallet_web_mark_paid(order) -> str:
+    """Đồng bộ đơn lên web rồi báo web 'đã trả bằng ví' (route bot-only /api/tg/orders/wallet-paid). Idempotent theo order_code."""
+    qty = int(order["quantity"] or 1)
+    try:
+        status, body = _post_web_json("/api/tg/orders/sync", {
+            "order_code": order["order_id"], "tg_user_id": int(order["user_id"]), "tg_username": str(order["user_name"] or ""),
+            "sku": order["product_id"], "product_name": sku_display_name(str(order["product_id"])), "qty": qty,
+            "amount_vnd": int(order["amount"]), "currency": "VND", "provider": "sepay"})
+        if status in (0, 408, 429) or status >= 500:
+            return wallet_pay.WEB_UNCERTAIN
+        if status != 200 or body.get("success") is not True:
+            return wallet_pay.WEB_REFUSED
+        status, body = _post_web_json("/api/tg/orders/wallet-paid", {
+            "order_code": order["order_id"], "tg_user_id": int(order["user_id"]), "sku": order["product_id"], "qty": qty,
+            "amount_vnd": int(order["amount"])})
+    except Exception:
+        return wallet_pay.WEB_UNCERTAIN
+    if status == 200 and body.get("success") is True:
+        return wallet_pay.WEB_OK
+    if status in (0, 408, 429) or status >= 500:
+        return wallet_pay.WEB_UNCERTAIN
+    return wallet_pay.WEB_REFUSED
+
+
+def _wallet_finish(order_id: str, user_id: int, bundle: str):
+    return deliver_product(order_id, user_id, bundle=bundle)
+
+
+def wallet_web_ops() -> "wallet_pay.WebOps":
+    return wallet_pay.WebOps(mark_paid=_wallet_web_mark_paid, claim=claim_stock_detailed, finish=_wallet_finish)
+
+
+def _process_wallet_order_sync(order_id: str):
+    conn = get_db_connection()
+    try:
+        return wallet_pay.process_order(conn, order_id, wallet_web_ops())
+    finally:
+        conn.close()
+
+
+async def _notify_wallet_result(bot, result) -> None:
+    """Báo khách/admin. Mọi lỗi gửi tin KHÔNG ảnh hưởng tiền hay đơn (đơn đã giao có cơ chế gửi lại delivery_notified_at)."""
+    lang = get_user_lang(result.user_id)
+    try:
+        if result.state == "completed":
+            await send_paid_order_delivery(bot, result.order_id, result.user_id)
+        elif result.state in ("refunded", "refunded_review"):
+            await bot.send_message(
+                chat_id=int(result.user_id), parse_mode="HTML",
+                text=f"{vip_em('shield', '🛡')} " + t(lang, "wpay_refunded_msg" if result.state == "refunded" else "wpay_refunded_review_msg",
+                                                    order=html.escape(result.order_id), amount=i18n.fmt_vnd(result.amount_vnd),
+                                                    balance=i18n.fmt_vnd(result.balance_vnd or 0)),
+                reply_markup=_wallet_back_markup(lang))
+            if result.state == "refunded_review":
+                logger.warning("Trả bằng ví: đơn %s đã hoàn tiền sau quá hạn, cần admin đối soát với web", result.order_id)
+                await bot.send_message(chat_id=int(ADMIN_ID), text=f"⚠️ Wallet order {result.order_id} (user {result.user_id}) was refunded after "
+                                       f"{wallet_pay.UNCERTAIN_REFUND_MINUTES} min without a confirmed delivery. Check the web order (needs_review).")
+    except Exception as error:
+        logger.warning("Trả bằng ví: không gửi được thông báo đơn %s: %s", result.order_id, type(error).__name__)
+
+
+async def run_wallet_order(bot, order_id: str):
+    """Giai đoạn 2 cho một đơn ví (một lần tại một thời điểm), rồi báo kết quả. Idempotent."""
+    async with WALLET_PAY_LOCK:
+        result = await asyncio.to_thread(_process_wallet_order_sync, order_id)
+    await _notify_wallet_result(bot, result)
+    return result
+
+
+def _begin_wallet_payment(user, sku: str, qty: int, price: int):
+    conn = get_db_connection()
+    try:
+        return wallet_pay.begin_payment(conn, user.id, user.username or user.first_name, sku, qty, price)
+    finally:
+        conn.close()
+
+
+async def handle_wallet_pay(query, context, user, lang: str, sku: str, qty: int) -> None:
+    """Nút "Trả bằng ví": kiểm tra trước, trừ ví + tạo đơn (GD1), giao hàng (GD2). Chỉ chat riêng, chỉ khi bật."""
+    back = _wallet_back_markup(lang, cb_buy(sku))
+    if not wallet_pay_enabled():
+        await safe_edit_or_reply(query, f"{vip_em('shield', '🛡')} {t(lang, 'wallet_err_unavailable')}", reply_markup=back, parse_mode="HTML")
+        return
+    if not _is_private_chat(query.message):
+        await query.answer(t(lang, "wallet_private_only"), show_alert=True)
+        return
+    # Kiểm tra trước (không đổi dữ liệu): SKU, số lượng, giá thật từ web, tồn kho.
+    await asyncio.to_thread(sync_web_product_price, sku)
+    product = get_product(sku)
+    price = int(product["price"] or 0) if product else 0
+    if sku not in known_skus() or price <= 0 or qty < 1 or qty > sku_max_qty(sku):
+        await query.answer(t(lang, "wpay_err_unavailable"), show_alert=True)
+        return
+    stock = await asyncio.to_thread(get_stock_count, sku)
+    if stock < qty:
+        await query.answer(t(lang, "alert_only_left", stock=stock) if stock > 0 else t(lang, "alert_sold_out"), show_alert=True)
+        return
+    try:
+        order = await asyncio.to_thread(_begin_wallet_payment, user, sku, qty, price)
+    except wallet_pay.PayError as error:
+        key = {"insufficient_funds": "wpay_err_funds", "in_flight": "wpay_err_busy"}.get(error.code, "wpay_err_unavailable")
+        await query.answer(t(lang, key), show_alert=True)
+        return
+    except Exception as error:
+        logger.error("Trả bằng ví: lỗi tạo đơn: %s", type(error).__name__)
+        await query.answer(t(lang, "wpay_err_unavailable"), show_alert=True)
+        return
+    await safe_edit_or_reply(
+        query, f"{vip_em('calendar', '⏳')} " + t(lang, "wpay_processing", order=html.escape(order.order_id), amount=i18n.fmt_vnd(order.amount_vnd)),
+        reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_wpay_check"), callback_data=f"confirm_pay_{order.order_id}", emoji_name="refresh")]]),
+        parse_mode="HTML")
+    result = await run_wallet_order(context.bot, order.order_id)
+    if result.state == "completed":
+        await safe_edit_or_reply(
+            query, f"{vip_em('check', '✅')} " + t(lang, "wpay_paid_msg", order=html.escape(order.order_id), amount=i18n.fmt_vnd(order.amount_vnd),
+                                                  balance=i18n.fmt_vnd(order.balance_vnd)),
+            reply_markup=_wallet_back_markup(lang, "main_menu"), parse_mode="HTML")
+
+
+async def handle_wallet_check(query, context, order, lang: str) -> None:
+    """Nút "Kiểm tra" của đơn ví: thử giao lại (idempotent) hoặc báo đã hoàn tiền."""
+    order_id = order["order_id"]
+    if order["status"] == "cancelled":
+        await query.answer(t(lang, "wpay_cancelled_alert"), show_alert=True)
+        return
+    result = await run_wallet_order(context.bot, order_id)
+    if result.state == "completed":
+        await query.answer(t(lang, "payment_confirmed_alert"), show_alert=True)
+    elif result.state in ("refunded", "refunded_review"):
+        await query.answer(t(lang, "wpay_cancelled_alert"), show_alert=True)
+    else:
+        await query.answer(t(lang, "wpay_wait_alert"), show_alert=True)
+
+
 async def handle_wallet_view(query, user, lang: str) -> None:
     back = InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]])
     if not wallet_enabled():
@@ -2657,6 +2852,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML"
             )
 
+    elif sku_cb and sku_cb[0] == "wp":
+        await handle_wallet_pay(query, context, user, lang, sku_cb[1], sku_cb[2])
+
     elif data.startswith("confirm_pay_"):
         order_id = data.replace("confirm_pay_", "")
         conn = get_db_connection()
@@ -2673,6 +2871,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if order["kind"] == "wallet_topup":
             await handle_topup_check(query, context, order, lang)
+            return
+
+        if order["payment_method"] == "wallet" and order["status"] in (wallet_pay.PROCESSING, "cancelled"):
+            await handle_wallet_check(query, context, order, lang)
             return
 
         if order["status"] == "completed":
@@ -3355,6 +3557,7 @@ async def auto_deliver_paid_orders_task(application: Application):
                      AND status IN ('pending', 'cancelled', 'expired', 'completed')
                      AND created_at >= datetime('now', '-7 days')
                      AND (kind <> 'wallet_topup' OR created_at >= datetime('now', '-2 days'))
+                     AND (payment_method IS NULL OR payment_method <> 'wallet' OR status = 'completed')
                    ORDER BY created_at DESC LIMIT 100"""
             ).fetchall()
             conn.close()
@@ -3377,6 +3580,19 @@ async def auto_deliver_paid_orders_task(application: Application):
         except Exception as error:
             logger.error("Lỗi kiểm tra giao hàng tự động: %s", type(error).__name__)
         await asyncio.sleep(15)
+
+
+async def wallet_pay_sweep_task(application: Application):
+    """Quét đơn trả bằng ví đang chờ giao (chạy ngay khi khởi động rồi mỗi phút): xử lý lại idempotent sau restart/lỗi mạng,
+    và hoàn tiền + báo admin khi quá 15 phút vẫn không giao được."""
+    while True:
+        try:
+            if wallet_pay_enabled():
+                for order_id in await asyncio.to_thread(_wallet_processing_ids):
+                    await run_wallet_order(application.bot, order_id)
+        except Exception as error:
+            logger.error("Quét đơn trả bằng ví lỗi: %s", type(error).__name__)
+        await asyncio.sleep(WALLET_SWEEP_SECONDS)
 
 
 async def auto_cancel_expired_orders_task(application: Application):
@@ -3471,6 +3687,7 @@ def run_shop_bot(token=None):
         logger.info("Số đơn đã cấp link đang chờ gửi Telegram: %s", awaiting)
         asyncio.create_task(auto_cancel_expired_orders_task(application))
         asyncio.create_task(auto_deliver_paid_orders_task(application))
+        asyncio.create_task(wallet_pay_sweep_task(application))
         asyncio.create_task(stock_watch_task(application))
 
     app = Application.builder().token(use_token).post_init(post_init_hook).build()

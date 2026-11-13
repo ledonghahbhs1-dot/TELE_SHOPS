@@ -256,6 +256,39 @@ STRINGS: dict[str, dict[str, str]] = {
         "vi": "Đơn nạp <code>{order_id}</code> đã hết hạn. Nếu bạn đã chuyển tiền, hệ thống vẫn sẽ tự cộng vào ví khi nhận được; nếu chưa, hãy tạo đơn nạp mới.",
         "en": "Top-up order <code>{order_id}</code> has expired. If you already paid, the wallet will still be credited automatically once the payment is received; otherwise create a new top-up.",
     },
+    "btn_pay_wallet_ok": {"vi": "Trả bằng ví · số dư {balance} · đủ", "en": "Pay with wallet · balance {balance} · enough"},
+    "btn_pay_wallet_short": {"vi": "Trả bằng ví · số dư {balance} · thiếu {missing}", "en": "Pay with wallet · balance {balance} · short by {missing}"},
+    "btn_wpay_check": {"vi": "Kiểm tra đơn", "en": "Check order"},
+    "wpay_err_funds": {
+        "vi": "Số dư ví không đủ để thanh toán đơn này. Hãy nạp thêm hoặc chọn phương thức khác. Chưa có khoản tiền nào bị trừ.",
+        "en": "Your wallet balance is not enough for this order. Top up or pick another method. Nothing has been charged.",
+    },
+    "wpay_err_busy": {
+        "vi": "Bạn đang có một đơn trả bằng ví đang xử lý. Vui lòng chờ đơn đó hoàn tất.",
+        "en": "You already have a wallet payment being processed. Please wait for it to finish.",
+    },
+    "wpay_err_unavailable": {
+        "vi": "Hiện chưa thanh toán bằng ví được (sản phẩm/số lượng/giá chưa hợp lệ). Chưa có khoản tiền nào bị trừ.",
+        "en": "Wallet payment is not available right now (product, quantity or price not valid). Nothing has been charged.",
+    },
+    "wpay_processing": {
+        "vi": "Đang xử lý đơn <code>{order}</code> ({amount}) đã trả bằng ví. Link sẽ được gửi ngay khi sẵn sàng; nếu chưa thấy, bấm Kiểm tra đơn.",
+        "en": "Processing order <code>{order}</code> ({amount}) paid with your wallet. The link is sent as soon as it is ready; if you do not see it, tap Check order.",
+    },
+    "wpay_paid_msg": {
+        "vi": "Đã thanh toán đơn <code>{order}</code> ({amount}) bằng ví. Số dư còn lại: <b>{balance}</b>. Link giao hàng đã được gửi.",
+        "en": "Order <code>{order}</code> ({amount}) was paid with your wallet. Remaining balance: <b>{balance}</b>. Your delivery was sent.",
+    },
+    "wpay_refunded_msg": {
+        "vi": "Đơn <code>{order}</code> không giao được (hết hàng/bị từ chối) nên <b>{amount}</b> đã được hoàn lại vào ví. Số dư hiện tại: <b>{balance}</b>.",
+        "en": "Order <code>{order}</code> could not be delivered (out of stock/refused), so <b>{amount}</b> was returned to your wallet. Current balance: <b>{balance}</b>.",
+    },
+    "wpay_refunded_review_msg": {
+        "vi": "Đơn <code>{order}</code> chưa giao được sau 15 phút nên <b>{amount}</b> đã được hoàn lại vào ví (số dư: <b>{balance}</b>). Admin sẽ kiểm tra đơn này; nếu bạn đã nhận hàng, vui lòng báo @wolfmodyt.",
+        "en": "Order <code>{order}</code> could not be delivered within 15 minutes, so <b>{amount}</b> was returned to your wallet (balance: <b>{balance}</b>). The admin will review this order; if you did receive the item, please tell @wolfmodyt.",
+    },
+    "wpay_cancelled_alert": {"vi": "Đơn này đã được hoàn tiền vào ví.", "en": "This order was refunded to your wallet."},
+    "wpay_wait_alert": {"vi": "Đơn đang được xử lý, vui lòng thử lại sau ít phút.", "en": "The order is still being processed, please try again in a few minutes."},
     "wallet_history_empty": {"vi": "Chưa có giao dịch nào.", "en": "No transactions yet."},
     "wallet_kind_topup": {"vi": "Nạp tiền", "en": "Top-up"},
     "wallet_kind_purchase": {"vi": "Mua hàng", "en": "Purchase"},
