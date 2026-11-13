@@ -8,6 +8,15 @@ Tài liệu vận hành cho chủ shop. Không chứa khoá/mật khẩu: các g
 - **Trên Railway bắt buộc gắn Volume** (ví dụ mount `/data`) và đặt `SHOP_DATA_DIR=/data` (hoặc để Railway tự đặt `RAILWAY_VOLUME_MOUNT_PATH`). Không có Volume thì mỗi lần deploy số dư biến mất. Bot **từ chối bật ví** (`WALLET_ENABLED=1 bị từ chối`, xem log) nếu thư mục dữ liệu nằm ngoài Volume.
 - Backup nằm ở `<DATA_DIR>/backups/shop-YYYYMMDD-HHMMSS.db`, giữ 14 bản mới nhất, tự tạo mỗi 6 giờ khi ví bật.
 
+### Kiểm tra Volume và SHOP_DATA_DIR trước khi bật ví
+1. Railway → service của bot → Volumes: có một Volume mount tại `/data`.
+2. Đặt biến `SHOP_DATA_DIR=/data` trong Railway Variables của bot, rồi redeploy.
+3. Kiểm tra bằng shell của service: `railway ssh`, rồi `ls -la /data`. Phải thấy `shop.db` (và sau 6 giờ hoặc sau `/backup` có thư mục `backups/`). Nếu `/data` trống hoặc không tồn tại thì dữ liệu đang nằm ngoài Volume: **chưa được bật ví**.
+4. Khi bật `WALLET_ENABLED=1` mà thư mục dữ liệu nằm ngoài Volume, log có dòng `WALLET_ENABLED=1 bị từ chối` và ví vẫn tắt.
+
+### Biến cần có ở web (Vercel)
+`TG_WALLET_TOPUP_KIND_ENABLED=1` (nạp ví), `TG_WALLET_PAY_ENABLED=1` (trả bằng ví), `TG_WALLET_TOPUP_USDT_VND_RATE` (tỷ giá VND→USDT cho nạp USDT; giá trị do chủ shop quyết). Sau khi đổi biến phải redeploy. Không dán giá trị bí mật vào tài liệu hay chat.
+
 ## 2. Các cờ (mặc định đều TẮT; giá trị phải đúng `1`)
 | Cờ (bot) | Làm gì | Cần thêm |
 |---|---|---|
@@ -20,7 +29,7 @@ Tắt một cờ là tắt tính năng ngay sau khi redeploy; số dư và sổ 
 
 ## 3. Thứ tự bật (từng bước, thử xong mới sang bước sau)
 1. **Chuẩn bị**: gắn Volume, đặt `SHOP_DATA_DIR`, deploy. Xác nhận web đã merge/deploy các route ví. Làm `/backup` thử (mục 5).
-2. **Ví + nạp VietQR**: đặt `WALLET_ENABLED=1`, `WALLET_TOPUP_ENABLED=1`. Dùng tài khoản của chính bạn nạp **20.000đ** (mức tối thiểu). Kiểm tra: tin báo "đã cộng", `/wallet <telegram_id>` thấy số dư 20.000 và dòng `topup`. Nạp lại cùng một lệnh/đơn không được cộng lần hai.
+2. **Ví + nạp VietQR** (bật `WALLET_ENABLED` và `WALLET_TOPUP_ENABLED` trước, chưa bật cờ nào khác): đặt `WALLET_ENABLED=1`, `WALLET_TOPUP_ENABLED=1`, đợi nạp VietQR thử thành công. Dùng tài khoản của chính bạn nạp **20.000đ** (mức tối thiểu). Kiểm tra: tin báo "đã cộng", `/wallet <telegram_id>` thấy số dư 20.000 và dòng `topup`. Nạp lại cùng một lệnh/đơn không được cộng lần hai.
 3. **Mua thử bằng ví**: web đặt `TG_WALLET_PAY_ENABLED=1`, bot đặt `WALLET_PAY_ENABLED=1`. Mua 1 sản phẩm rẻ bằng ví: nhận hàng, số dư giảm đúng giá, sổ có dòng `purchase`. Thử khi hết kho (hoặc sản phẩm không có hàng) để thấy tự hoàn tiền `refund`.
 4. **USDT**: đặt `TG_WALLET_TOPUP_USDT_VND_RATE` ở web, rồi `WALLET_TOPUP_USDT_ENABLED=1` ở bot. Thử từng phương thức bằng khoản nhỏ nhất, bắt đầu từ cái bạn đã dùng ổn ở luồng mua hàng.
 5. Theo dõi log 24 giờ đầu trước khi quảng bá.
