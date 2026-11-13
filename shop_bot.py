@@ -23,6 +23,7 @@ import product_guides
 import product_intros
 import stock_notify
 import wallet_pay
+import wallet_admin
 import wallet_store
 import wallet_topup
 from i18n import t
@@ -2398,6 +2399,161 @@ async def handle_wallet_check(query, context, order, lang: str) -> None:
         await query.answer(t(lang, "wpay_wait_alert"), show_alert=True)
 
 
+# ── Admin ví (PR4): /wallet, /wallet_add, /wallet_sub, /backup. Chỉ admin, chỉ chat riêng, chỉ khi ví bật ────────────────────
+# Không log số dư / lý do / số tiền vào log chung (chỉ mã lỗi).
+_ADMIN_ERRORS = {
+    "bad_user": "Telegram ID không hợp lệ (chỉ gồm chữ số).",
+    "bad_amount": "Số tiền không hợp lệ: chỉ nhập số nguyên dương, ví dụ 50000.",
+    "too_large": f"Mỗi lần chỉnh tối đa {wallet_store.MAX_ADMIN_ADJUST_VND:,} VNĐ.",
+    "reason_required": f"Phải có lý do (tối đa {wallet_store.MAX_NOTE_LENGTH} ký tự).",
+    "insufficient_funds": "Số dư của khách không đủ để trừ (ví không được âm).",
+}
+
+
+async def _admin_wallet_gate(update) -> bool:
+    """Admin + chat riêng + ví bật. Người không phải admin bị từ chối; không tiết lộ gì thêm."""
+    message = update.message
+    if message is None:
+        return False
+    if not is_admin(update.effective_user):
+        await message.reply_text(f"{vip_em('cross', '⛔')} <b>Bạn không có quyền Admin!</b>", parse_mode="HTML")
+        return False
+    if not _is_private_chat(message):
+        await message.reply_text("Vui lòng dùng lệnh này trong chat riêng với bot.")
+        return False
+    return True
+
+
+def _admin_args(update, context) -> list[str]:
+    if context.args:
+        return list(context.args)
+    return update.message.text.split()[1:] if update.message and update.message.text else []
+
+
+def _format_ledger_line(line) -> str:
+    sign = "+" if line.amount_vnd > 0 else "-"
+    note = f" · {html.escape(line.note)}" if line.note else ""
+    return (f"#{line.id} {sign}{abs(line.amount_vnd):,} · {line.kind} · số dư {line.balance_after:,} · "
+            f"<code>{html.escape(line.ref)}</code> · {str(line.created_at)[:16]}{note}")
+
+
+def _admin_wallet_view_sync(user_id: int):
+    conn = get_db_connection()
+    try:
+        return wallet_admin.view(conn, user_id, 10)
+    finally:
+        conn.close()
+
+
+def _admin_wallet_adjust_sync(user_id: int, sign: int, amount: int, reason: str, admin_id):
+    conn = get_db_connection()
+    try:
+        return wallet_admin.adjust(conn, user_id, sign, amount, reason, admin_id)
+    finally:
+        conn.close()
+
+
+async def admin_wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/wallet <telegram_id>: số dư + 10 dòng sổ cái gần nhất."""
+    if not await _admin_wallet_gate(update):
+        return
+    if not wallet_enabled():
+        await update.message.reply_text("Ví chưa bật (WALLET_ENABLED).")
+        return
+    args = _admin_args(update, context)
+    if len(args) != 1:
+        await update.message.reply_text("Cú pháp: /wallet <telegram_id>")
+        return
+    try:
+        view = await asyncio.to_thread(_admin_wallet_view_sync, wallet_admin.parse_user_id(args[0]))
+    except wallet_admin.AdminError as error:
+        await update.message.reply_text(_ADMIN_ERRORS.get(error.code, "Lỗi."))
+        return
+    except Exception as error:
+        logger.error("Admin ví: không đọc được ví: %s", type(error).__name__)
+        await update.message.reply_text("Không đọc được ví lúc này.")
+        return
+    lines = "\n".join(_format_ledger_line(line) for line in view.lines) or "Chưa có giao dịch."
+    await update.message.reply_text(f"<b>Ví {view.user_id}</b>\nSố dư: <b>{view.balance_vnd:,} VNĐ</b>\n\n{lines}", parse_mode="HTML")
+
+
+async def _admin_wallet_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE, sign: int, usage: str):
+    if not await _admin_wallet_gate(update):
+        return
+    if not wallet_enabled():
+        await update.message.reply_text("Ví chưa bật (WALLET_ENABLED).")
+        return
+    args = _admin_args(update, context)
+    if len(args) < 3:
+        await update.message.reply_text(f"Cú pháp: {usage}\nLý do là bắt buộc.")
+        return
+    try:
+        user_id = wallet_admin.parse_user_id(args[0])
+        amount = wallet_admin.parse_amount(args[1])
+        line = await asyncio.to_thread(_admin_wallet_adjust_sync, user_id, sign, amount, " ".join(args[2:]), update.effective_user.id)
+    except wallet_admin.AdminError as error:
+        await update.message.reply_text(_ADMIN_ERRORS.get(error.code, "Lỗi."))
+        return
+    except Exception as error:
+        logger.error("Admin ví: không chỉnh được ví: %s", type(error).__name__)
+        await update.message.reply_text("Không chỉnh được ví lúc này. Chưa có thay đổi nào.")
+        return
+    await update.message.reply_text(f"{vip_em('check', '✅')} Đã ghi dòng sổ cái:\n{_format_ledger_line(line)}", parse_mode="HTML")
+
+
+async def admin_wallet_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _admin_wallet_adjust(update, context, 1, "/wallet_add <telegram_id> <số_tiền> <lý do>")
+
+
+async def admin_wallet_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _admin_wallet_adjust(update, context, -1, "/wallet_sub <telegram_id> <số_tiền> <lý do>")
+
+
+TELEGRAM_FILE_LIMIT_BYTES = 45 * 1024 * 1024
+
+
+def _make_backup_sync() -> str:
+    conn = get_db_connection()
+    try:
+        return wallet_admin.make_backup(conn, DATA_DIR)
+    finally:
+        conn.close()
+
+
+async def admin_backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/backup: tạo bản sao lưu DB mới (giữ 14 bản) và gửi file cho admin trong chat riêng."""
+    if not await _admin_wallet_gate(update):
+        return
+    try:
+        path = await asyncio.to_thread(_make_backup_sync)
+    except Exception as error:
+        logger.error("Sao lưu DB lỗi: %s", type(error).__name__)
+        await update.message.reply_text("Không tạo được bản sao lưu lúc này.")
+        return
+    if os.path.getsize(path) > TELEGRAM_FILE_LIMIT_BYTES:
+        await update.message.reply_text(f"Đã tạo bản sao lưu nhưng quá lớn để gửi qua Telegram: {os.path.basename(path)} (trong thư mục backups của ổ dữ liệu).")
+        return
+    try:
+        with open(path, "rb") as handle:
+            await update.message.reply_document(document=handle, filename=os.path.basename(path))
+    except Exception as error:
+        logger.warning("Không gửi được file sao lưu: %s", type(error).__name__)
+        await update.message.reply_text("Đã tạo bản sao lưu nhưng không gửi được file. Thử lại /backup.")
+
+
+async def wallet_backup_task(application: Application):
+    """Sao lưu định kỳ (mỗi 6 giờ, giữ 14 bản) khi ví bật. Không log nội dung."""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            if wallet_enabled():
+                await asyncio.to_thread(_make_backup_sync)
+                logger.info("Đã sao lưu DB định kỳ.")
+        except Exception as error:
+            logger.error("Sao lưu định kỳ lỗi: %s", type(error).__name__)
+        await asyncio.sleep(wallet_admin.BACKUP_INTERVAL_HOURS * 3600)
+
+
 async def handle_wallet_view(query, user, lang: str) -> None:
     back = InlineKeyboardMarkup([[vip_btn(t(lang, "btn_back_main"), callback_data="main_menu", emoji_name="back")]])
     if not wallet_enabled():
@@ -3687,6 +3843,7 @@ def run_shop_bot(token=None):
         logger.info("Số đơn đã cấp link đang chờ gửi Telegram: %s", awaiting)
         asyncio.create_task(auto_cancel_expired_orders_task(application))
         asyncio.create_task(auto_deliver_paid_orders_task(application))
+        asyncio.create_task(wallet_backup_task(application))
         asyncio.create_task(wallet_pay_sweep_task(application))
         asyncio.create_task(stock_watch_task(application))
 
@@ -3705,6 +3862,10 @@ def run_shop_bot(token=None):
     app.add_handler(CommandHandler("testmode", admin_set_test_mode))
     app.add_handler(CommandHandler("addstock", admin_add_stock))
     app.add_handler(CommandHandler("setchannel", admin_set_channel))
+    app.add_handler(CommandHandler("wallet", admin_wallet_command))
+    app.add_handler(CommandHandler("wallet_add", admin_wallet_add))
+    app.add_handler(CommandHandler("wallet_sub", admin_wallet_sub))
+    app.add_handler(CommandHandler("backup", admin_backup_command))
 
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"(?i)^\.setprice\b"), admin_set_price))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"(?i)^\.setbank\b"), admin_set_bank))
