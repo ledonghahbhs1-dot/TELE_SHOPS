@@ -11,7 +11,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 import shop_bot
 
-ICON_ID = "5796185041717433060"
+ICON_ID = "5796185041717433060"  # ChatGPT
+GOOGLE_ID = "5796314805564346672"  # Google (task 069)
 
 
 def utf16_len(text):
@@ -23,16 +24,19 @@ class IconConstantTests(unittest.TestCase):
         self.assertEqual(shop_bot.CHATGPT_ICON_CUSTOM_EMOJI_ID, ICON_ID)
         self.assertEqual(shop_bot.BOT_PRODUCT_ICON, {"chatgpt_go_3m": ICON_ID})
         self.assertEqual(shop_bot.product_icon_id("chatgpt_go_3m"), ICON_ID)
-        self.assertEqual(shop_bot.product_icon_id("gemini_plus"), "")
-        self.assertEqual(shop_bot.product_icon_id("gemini_pro_account"), "")
+        self.assertEqual(shop_bot.GOOGLE_ICON_CUSTOM_EMOJI_ID, GOOGLE_ID)
+        self.assertEqual(shop_bot.product_icon_id("gemini_plus"), GOOGLE_ID)
+        self.assertEqual(shop_bot.product_icon_id("gemini_pro_account"), GOOGLE_ID)
         self.assertNotIn(ICON_ID, shop_bot.VIP_EMOJIS.values())
 
-    def test_google_icon_applies_to_google_skus_only_when_set(self):
-        with patch.object(shop_bot, "GOOGLE_ICON_CUSTOM_EMOJI_ID", "111222"):
-            self.assertEqual(shop_bot.product_icon_id("gemini_plus"), "111222")
-            self.assertEqual(shop_bot.product_icon_id("gemini_pro_account"), "111222")
-            self.assertEqual(shop_bot.product_icon_id("chatgpt_go_3m"), ICON_ID)
-            self.assertEqual(shop_bot.product_icon_id("other"), "")
+    def test_google_icon_applies_to_google_skus_only(self):
+        self.assertEqual(shop_bot.product_icon_id("chatgpt_go_3m"), ICON_ID)
+        self.assertEqual(shop_bot.product_icon_id("other"), "")
+
+    def test_empty_google_constant_falls_back_to_the_default(self):
+        with patch.object(shop_bot, "GOOGLE_ICON_CUSTOM_EMOJI_ID", ""):
+            self.assertEqual(shop_bot.product_icon_id("gemini_plus"), "")
+            self.assertEqual(shop_bot.product_icon_id("gemini_pro_account"), "")
 
     def test_id_is_not_hardcoded_elsewhere_in_the_bot_sources(self):
         root = Path(shop_bot.__file__).parent
@@ -137,25 +141,38 @@ class ShopButtonTests(unittest.TestCase):
             self.assertNotRegex(button.text, r"\d[\d.,]*\s*(VNĐ|VND|đ)", button.text)
         self.assertEqual(product_buttons[0].text, "GOOGLE AI PLUS 12 THÁNG (Kho: 290)")
 
-    def test_only_chatgpt_gets_the_chatgpt_icon_google_keeps_the_default_crown(self):
+    def test_google_buttons_have_the_google_icon_and_not_chatgpt_and_vice_versa(self):
         icons = self.icon_by_callback(self.keyboard({"gemini_plus": 290, "gemini_pro_account": 3, "chatgpt_go_3m": 4}))
+        self.assertEqual(icons["buy_gemini_plus"], GOOGLE_ID)
+        self.assertEqual(icons["buy_gemini_pro_account"], GOOGLE_ID)
+        self.assertNotEqual(icons["buy_gemini_plus"], ICON_ID)
+        self.assertNotEqual(icons["buy_gemini_pro_account"], ICON_ID)
         self.assertEqual(icons["buy_chatgpt_go_3m"], ICON_ID)
+        self.assertNotEqual(icons["buy_chatgpt_go_3m"], GOOGLE_ID)
+
+    def test_shop_title_still_two_crowns_without_google_or_chatgpt_icon(self):
+        text = shop_bot.shop_message("vi")
+        self.assertEqual(text.count(f'emoji-id="{shop_bot.VIP_EMOJIS["crown"]}"'), 2)
+        self.assertNotIn(ICON_ID, text)
+        self.assertNotIn(GOOGLE_ID, text)
+
+    def test_empty_google_constant_keeps_crown_default_on_buttons(self):
+        with patch.object(shop_bot, "GOOGLE_ICON_CUSTOM_EMOJI_ID", ""):
+            icons = self.icon_by_callback(self.keyboard({"gemini_plus": 290, "gemini_pro_account": 3, "chatgpt_go_3m": 4}))
         self.assertEqual(icons["buy_gemini_plus"], shop_bot.VIP_EMOJIS["crown"])
-        self.assertEqual(icons["buy_gemini_pro_account"], shop_bot.VIP_EMOJIS["crown"])
-        self.assertNotIn(ICON_ID, [icons["buy_gemini_plus"], icons["buy_gemini_pro_account"]])
+        self.assertEqual(icons["buy_chatgpt_go_3m"], ICON_ID)
 
     def test_out_of_stock_keeps_cross_for_google_and_chatgpt_icon_for_chatgpt(self):
-        icons = self.icon_by_callback(self.keyboard({}))
+        with patch.object(shop_bot, "GOOGLE_ICON_CUSTOM_EMOJI_ID", ""):
+            icons = self.icon_by_callback(self.keyboard({}))
         self.assertEqual(icons["soldout_chatgpt_go_3m"], ICON_ID)
         self.assertEqual(icons["soldout_gemini_pro_account"], shop_bot.VIP_EMOJIS["cross"])
         self.assertEqual(icons["buy_gemini_plus"], shop_bot.VIP_EMOJIS["cross"])  # plus keeps its own page when sold out
 
-    def test_google_icon_constant_applies_to_google_buttons_and_not_chatgpt(self):
-        with patch.object(shop_bot, "GOOGLE_ICON_CUSTOM_EMOJI_ID", "111222"):
-            icons = self.icon_by_callback(self.keyboard({"gemini_plus": 5, "gemini_pro_account": 3, "chatgpt_go_3m": 4}))
-        self.assertEqual(icons["buy_gemini_plus"], "111222")
-        self.assertEqual(icons["buy_gemini_pro_account"], "111222")
-        self.assertEqual(icons["buy_chatgpt_go_3m"], ICON_ID)
+    def test_out_of_stock_google_buttons_use_the_google_icon(self):
+        icons = self.icon_by_callback(self.keyboard({"chatgpt_go_3m": 1}))
+        self.assertEqual(icons["soldout_gemini_pro_account"], GOOGLE_ID)
+        self.assertEqual(icons["buy_gemini_plus"], GOOGLE_ID)
 
     def test_callback_data_is_unchanged(self):
         keyboard = self.keyboard({"gemini_plus": 5, "gemini_pro_account": 3, "chatgpt_go_3m": 4})
