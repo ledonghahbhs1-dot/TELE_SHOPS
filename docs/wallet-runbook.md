@@ -3,7 +3,7 @@
 Tài liệu vận hành cho chủ shop. Không chứa khoá/mật khẩu: các giá trị bí mật chỉ đặt trong Railway Variables, không ghi vào đây hay vào chat.
 
 ## 1. Dữ liệu nằm ở đâu
-- Số dư và sổ ví nằm trong SQLite của bot: `<DATA_DIR>/shop.db` (bảng `wallet_accounts`, `wallet_ledger`).
+- Số dư và sổ ví nằm trong SQLite của bot: `<DATA_DIR>/shop_database.db` (bảng `wallet_accounts`, `wallet_ledger`).
 - `DATA_DIR` = `SHOP_DATA_DIR`, nếu không có thì `RAILWAY_VOLUME_MOUNT_PATH`, nếu không có nữa thì `./data`.
 - **Trên Railway bắt buộc gắn Volume** (ví dụ mount `/data`) và đặt `SHOP_DATA_DIR=/data` (hoặc để Railway tự đặt `RAILWAY_VOLUME_MOUNT_PATH`). Không có Volume thì mỗi lần deploy số dư biến mất. Bot **từ chối bật ví** (`WALLET_ENABLED=1 bị từ chối`, xem log) nếu thư mục dữ liệu nằm ngoài Volume.
 - Backup nằm ở `<DATA_DIR>/backups/shop-YYYYMMDD-HHMMSS.db`, giữ 14 bản mới nhất, tự tạo mỗi 6 giờ khi ví bật.
@@ -11,7 +11,7 @@ Tài liệu vận hành cho chủ shop. Không chứa khoá/mật khẩu: các g
 ### Kiểm tra Volume và SHOP_DATA_DIR trước khi bật ví
 1. Railway → service của bot → Volumes: có một Volume mount tại `/data`.
 2. Đặt biến `SHOP_DATA_DIR=/data` trong Railway Variables của bot, rồi redeploy.
-3. Kiểm tra bằng shell của service: `railway ssh`, rồi `ls -la /data`. Phải thấy `shop.db` (và sau 6 giờ hoặc sau `/backup` có thư mục `backups/`). Nếu `/data` trống hoặc không tồn tại thì dữ liệu đang nằm ngoài Volume: **chưa được bật ví**.
+3. Kiểm tra bằng shell của service: `railway ssh`, rồi `ls -la /data`. Phải thấy `shop_database.db` (và sau 6 giờ hoặc sau `/backup` có thư mục `backups/`). Nếu `/data` trống hoặc không tồn tại thì dữ liệu đang nằm ngoài Volume: **chưa được bật ví**.
 4. Khi bật `WALLET_ENABLED=1` mà thư mục dữ liệu nằm ngoài Volume, log có dòng `WALLET_ENABLED=1 bị từ chối` và ví vẫn tắt.
 
 ### Biến cần có ở web (Vercel)
@@ -47,8 +47,8 @@ Hạn mức hiện tại: nạp 20.000đ–2.000.000đ mỗi lần, số dư t�
 - Backup tự động mỗi 6 giờ, giữ 14 bản. Backup cùng Volume với DB, nên **định kỳ gõ `/backup` và lưu file bot gửi về chat** (hoặc tải file từ Volume) rồi cất ở nơi khác.
 - Khôi phục (mất/hỏng DB):
   1. Tắt bot (stop service) để không ghi vào DB.
-  2. Trong Volume: đổi tên `shop.db` hiện tại thành `shop.db.broken`, xoá `shop.db-wal` và `shop.db-shm` nếu có.
-  3. Chép bản backup muốn dùng thành `shop.db` (ví dụ `cp backups/shop-20260101-120000.db shop.db`).
+  2. Trong Volume: đổi tên `shop_database.db` hiện tại thành `shop_database.db.broken`, xoá `shop_database.db-wal` và `shop_database.db-shm` nếu có.
+  3. Chép bản backup muốn dùng thành `shop_database.db` (ví dụ `cp backups/shop-20260101-120000.db shop_database.db`).
   4. Bật lại bot. Khi khởi động bot tự tạo bảng còn thiếu; kiểm tra `/wallet` vài khách quen.
   5. Giao dịch xảy ra sau thời điểm backup sẽ không có: đối chiếu đơn nạp/đơn ví gần đây với web và dùng `/wallet_add`/`/wallet_sub` (kèm lý do) để chỉnh.
 - Dùng backup mới nhất còn nguyên vẹn; nếu mở bằng `sqlite3` báo lỗi thì thử bản cũ hơn.
