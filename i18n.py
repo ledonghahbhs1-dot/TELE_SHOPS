@@ -207,6 +207,55 @@ STRINGS: dict[str, dict[str, str]] = {
         "vi": "{wallet} <b>Ví của tôi</b>\n\nSố dư: <b>{balance}</b> (≈ {usd})\n\n<b>Giao dịch gần đây</b>\n{history}\n\n<i>Số dư chỉ dùng trong bot này. Nạp tiền và thanh toán bằng ví sẽ sớm có.</i>",
         "en": "{wallet} <b>My Wallet</b>\n\nBalance: <b>{balance}</b> (≈ {usd})\n\n<b>Recent transactions</b>\n{history}\n\n<i>The balance can only be used in this bot. Top-up and paying with the wallet are coming soon.</i>",
     },
+    "wallet_screen_t": {
+        "vi": "{wallet} <b>Ví của tôi</b>\n\nSố dư: <b>{balance}</b> (≈ {usd})\n\n<b>Giao dịch gần đây</b>\n{history}\n\n<i>Số dư chỉ dùng trong bot này. Thanh toán bằng ví sẽ sớm có.</i>",
+        "en": "{wallet} <b>My Wallet</b>\n\nBalance: <b>{balance}</b> (≈ {usd})\n\n<b>Recent transactions</b>\n{history}\n\n<i>The balance can only be used in this bot. Paying with the wallet is coming soon.</i>",
+    },
+    "btn_topup_open": {"vi": "Nạp tiền", "en": "Top up"},
+    "btn_topup_other": {"vi": "Nhập số khác", "en": "Other amount"},
+    "topup_menu": {
+        "vi": "<b>Nạp tiền vào ví</b>\n\nChọn số tiền hoặc nhập số khác.\nTối thiểu {min}, tối đa {max} mỗi lần; số dư tối đa {cap}.",
+        "en": "<b>Top up your wallet</b>\n\nPick an amount or enter another one.\nMinimum {min}, maximum {max} per top-up; the balance can hold at most {cap}.",
+    },
+    "topup_prompt": {
+        "vi": "Nhập số tiền muốn nạp (VNĐ), từ {min} đến {max}. Ví dụ: 150000",
+        "en": "Send the amount to top up (VND), from {min} to {max}. Example: 150000",
+    },
+    "topup_not_number": {
+        "vi": "Số tiền không hợp lệ. Vui lòng chỉ nhập chữ số, ví dụ 150000.",
+        "en": "That is not a valid amount. Please send digits only, for example 150000.",
+    },
+    "topup_bill_service": {"vi": "Nạp tiền vào ví", "en": "Wallet top-up"},
+    "topup_err_amount": {
+        "vi": "Số tiền nạp phải từ {min} đến {max}.",
+        "en": "The top-up amount must be between {min} and {max}.",
+    },
+    "topup_err_cap": {
+        "vi": "Nạp số tiền này sẽ vượt số dư tối đa của ví ({cap}). Hãy chọn số nhỏ hơn.",
+        "en": "This top-up would exceed the maximum wallet balance ({cap}). Please pick a smaller amount.",
+    },
+    "topup_err_pending": {
+        "vi": "Bạn đang có {limit} đơn nạp chờ thanh toán. Hãy thanh toán hoặc huỷ bớt rồi thử lại.",
+        "en": "You already have {limit} top-up orders waiting for payment. Pay or cancel one and try again.",
+    },
+    "topup_err_unavailable": {
+        "vi": "Hiện chưa tạo được đơn nạp. Vui lòng thử lại sau ít phút. Chưa có khoản tiền nào bị trừ.",
+        "en": "We could not create the top-up order right now. Please try again in a few minutes. Nothing has been charged.",
+    },
+    "topup_err_unavailable_short": {
+        "vi": "Chưa xử lý được lúc này, vui lòng bấm kiểm tra lại sau ít phút.",
+        "en": "Could not process this right now, please check again in a few minutes.",
+    },
+    "topup_credited_alert": {"vi": "Đã cộng tiền vào ví!", "en": "Your wallet has been credited!"},
+    "topup_already_alert": {"vi": "Đơn nạp này đã được cộng vào ví trước đó.", "en": "This top-up was already credited to your wallet."},
+    "topup_credited_msg": {
+        "vi": "Đã nạp <b>{amount}</b> vào ví (đơn <code>{order}</code>). Số dư hiện tại: <b>{balance}</b>.",
+        "en": "<b>{amount}</b> was added to your wallet (order <code>{order}</code>). Current balance: <b>{balance}</b>.",
+    },
+    "topup_expired": {
+        "vi": "Đơn nạp <code>{order_id}</code> đã hết hạn. Nếu bạn đã chuyển tiền, hệ thống vẫn sẽ tự cộng vào ví khi nhận được; nếu chưa, hãy tạo đơn nạp mới.",
+        "en": "Top-up order <code>{order_id}</code> has expired. If you already paid, the wallet will still be credited automatically once the payment is received; otherwise create a new top-up.",
+    },
     "wallet_history_empty": {"vi": "Chưa có giao dịch nào.", "en": "No transactions yet."},
     "wallet_kind_topup": {"vi": "Nạp tiền", "en": "Top-up"},
     "wallet_kind_purchase": {"vi": "Mua hàng", "en": "Purchase"},
