@@ -140,7 +140,7 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts(markup), ["Mua hàng", "Đơn đã mua", "Hỗ trợ", "Ngôn ngữ: Tiếng Việt"])
         self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"soldout_{GPT}", "main_menu"])
         labels = texts(shop)
-        self.assertEqual(labels[0], "GOOGLE AI PLUS 12 THÁNG (Kho: 294)")
+        self.assertEqual(labels[0], "GOOGLE AI PLUS 12 THÁNG")
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", labels[1])
         self.assertNotIn("125,000", labels[1])
         self.assertIn("CHATGPT GO 3 THÁNG", labels[2])

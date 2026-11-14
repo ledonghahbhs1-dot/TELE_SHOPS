@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+import i18n
 import shop_bot
 
 ICON_ID = "5796185041717433060"  # ChatGPT
@@ -139,7 +140,7 @@ class ShopButtonTests(unittest.TestCase):
         for button in product_buttons:
             self.assertFalse(button.text.upper().startswith("MUA"), button.text)
             self.assertNotRegex(button.text, r"\d[\d.,]*\s*(VNĐ|VND|đ)", button.text)
-        self.assertEqual(product_buttons[0].text, "GOOGLE AI PLUS 12 THÁNG (Kho: 290)")
+        self.assertEqual(product_buttons[0].text, "GOOGLE AI PLUS 12 THÁNG")
 
     def test_google_buttons_have_the_google_icon_and_not_chatgpt_and_vice_versa(self):
         icons = self.icon_by_callback(self.keyboard({"gemini_plus": 290, "gemini_pro_account": 3, "chatgpt_go_3m": 4}))
@@ -185,11 +186,28 @@ class ShopButtonTests(unittest.TestCase):
         self.assertTrue(any(t.endswith("• HẾT HÀNG") for t in texts), texts)
         self.assertFalse(any("VNĐ" in t or "VND" in t for t in texts))
 
+    def test_gemini_plus_button_has_no_stock_number_even_when_in_stock(self):
+        with patch.object(shop_bot, "get_stock_count", side_effect=AssertionError("shop_keyboard must not query stock counts")), (
+                patch.object(shop_bot, "sku_price_vnd", return_value=125_000)), (
+                patch.object(shop_bot, "sku_is_in_stock", return_value=True)):
+            for lang in ("vi", "en"):
+                keyboard = shop_bot.shop_keyboard(1, lang)
+                button = next(b for row in keyboard.inline_keyboard for b in row if b.callback_data == "buy_gemini_plus")
+                self.assertNotRegex(button.text, r"\(.*\d.*\)", button.text)
+                for marker in ("Kho", "Stock", "{stock}"):
+                    self.assertNotIn(marker, button.text)
+
+    def test_i18n_button_strings_have_no_stock_placeholder(self):
+        for key, value in i18n.STRINGS.items():
+            if key.startswith("btn_"):
+                for lang, text in value.items():
+                    self.assertNotIn("{stock}", text, (key, lang))
+
     def test_english_labels_follow_the_same_rule(self):
         keyboard = self.keyboard({"gemini_plus": 5})
         first = keyboard.inline_keyboard[0][0]
         self.assertFalse(first.text.upper().startswith("BUY"))
-        self.assertIn("(Stock: 5)", shop_bot.t("en", "btn_product_buy", name="X", stock=5))
+        self.assertEqual(shop_bot.t("en", "btn_product_buy_nostock", name="X"), "X")
         self.assertEqual(shop_bot.t("en", "btn_product_oos", name="X"), "X • OUT OF STOCK")
 
 
