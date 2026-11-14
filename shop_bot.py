@@ -1637,10 +1637,7 @@ def shop_keyboard(user_id=None, lang: str | None = None):
         row = get_product(sku)
         label = (product_content.short_name(sku, lang) or (str(row["name"]) if row else sku))[:40]
         if sku_is_in_stock(sku):
-            if sku == DEFAULT_SKU:
-                text = t(lang, "btn_product_buy", name=label, stock=get_stock_count(sku))
-            else:
-                text = t(lang, "btn_product_buy_nostock", name=label)
+            text = t(lang, "btn_product_buy_nostock", name=label)  # nút không hiện số tồn kho
             keyboard.append([vip_btn(text, callback_data=cb_buy(sku), emoji_name="crown", style="primary", icon_id=product_icon_id(sku))])
         else:
             # gemini_plus keeps opening its own page (which says sold out), as before; others show a sold-out alert.

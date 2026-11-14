@@ -299,7 +299,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(labels[0].startswith("GOOGLE AI PLUS 12 "), labels[0])
                 self.assertFalse(labels[0].upper().startswith(buy), labels[0])
                 self.assertNotIn("14,999", labels[0])
-                self.assertIn("293", labels[0])
+                self.assertNotIn("293", labels[0])  # nút không hiện tồn kho
                 self.assertIn(name, labels[2])
                 self.assertNotIn("100,000", labels[2])
 
