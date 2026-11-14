@@ -37,6 +37,21 @@ def fmt_vnd(amount) -> str:
     return f"{int(amount):,} VNĐ"
 
 
+def fmt_money(lang, vnd, usd=None) -> str:
+    """vi: giữ nguyên '125,000 VNĐ'. en: '125,000 VND (~$5.00)'; không có usd thì chỉ '125,000 VND' (không bịa tỉ giá)."""
+    if normalize_lang(lang) != "en":
+        return fmt_vnd(vnd)
+    text = f"{int(vnd):,} VND"
+    if usd is not None:
+        text += f" (~${float(usd):,.2f})"
+    return text
+
+
+def fmt_money_rate(lang, vnd) -> str:
+    """Như fmt_money nhưng USD quy đổi theo tỉ giá hiển thị sẵn có của bot (BOT_VND_PER_USD) — dùng cho ví/nạp ví."""
+    return fmt_money(lang, vnd, usd_from_vnd(vnd) if normalize_lang(lang) == "en" else None)
+
+
 def usd_from_vnd(vnd) -> float:
     return round(int(vnd) / BOT_VND_PER_USD, 2)
 

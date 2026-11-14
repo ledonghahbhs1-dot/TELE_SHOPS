@@ -1100,6 +1100,21 @@ def listed_skus() -> list[str]:
     return skus
 
 
+def sku_usd_unit(sku: str):
+    """Giá USDT/đơn vị do web trả về (settings); None nếu chưa có — khi đó chỉ hiện VND, không bịa tỉ giá."""
+    try:
+        value = float(get_setting(usdt_setting_key(sku), ""))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def money_for_sku(lang, sku: str, vnd, qty: int = 1) -> str:
+    """Tiền của sản phẩm: vi giữ nguyên; en thêm (~$USD) = price_usdt x qty nếu có."""
+    unit = sku_usd_unit(sku) if i18n.normalize_lang(lang) == "en" else None
+    return i18n.fmt_money(lang, vnd, round(unit * qty, 2) if unit is not None else None)
+
+
 def sku_price_vnd(sku: str) -> int:
     row = get_product(sku)
     price = int(row["price"] or 0) if row else 0
@@ -1231,8 +1246,8 @@ async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
     prod = get_product(sku)
     price_unit = prod["price"]
     total_vnd = price_unit * qty
-    price_unit_fmt = i18n.fmt_vnd(price_unit)
-    total_vnd_fmt = i18n.fmt_vnd(total_vnd)
+    price_unit_fmt = money_for_sku(lang, sku, price_unit)
+    total_vnd_fmt = money_for_sku(lang, sku, total_vnd, qty)
 
     usdt_unit = get_usdt_price(sku)
     total_usdt = round(usdt_unit * qty, 2)
@@ -1271,7 +1286,7 @@ async def show_order_confirmation(target, user, sku="gemini_plus", qty=1):
             balance = None
         if balance is not None:
             label = t(lang, "btn_pay_wallet_ok" if balance >= total_vnd else "btn_pay_wallet_short",
-                      balance=i18n.fmt_vnd(balance), missing=i18n.fmt_vnd(max(0, total_vnd - balance)))
+                      balance=i18n.fmt_money_rate(lang, balance), missing=i18n.fmt_money_rate(lang, max(0, total_vnd - balance)))
             keyboard.insert(2, [vip_btn(label, callback_data=cb_qty("wallet", sku, qty), emoji_name="wallet")])
     if binance_pay_enabled():
         # Tùy chọn thêm (mặc định TẮT): USDT qua Binance Pay, khách trả đúng giá rồi dán ID lệnh.
@@ -1497,7 +1512,7 @@ def render_product_detail(sku: str, lang: str, price: int) -> str:
         lines.append(f"{vip_em('calendar', '⏳')} <b>{L('lbl_duration')}:</b> {html.escape(str(duration))}")
     if price > 0:
         lines.append(f"{vip_em('money', '💰')} <b>{L('lbl_price')}:</b> "
-                     f"<b>{L('price_line', vnd=i18n.fmt_vnd(price), usd=i18n.fmt_usd(price))}</b>")
+                     f"<b>{money_for_sku(lang, sku, price) if lang == 'en' and sku_usd_unit(sku) is not None else L('price_line', vnd=i18n.fmt_vnd(price), usd=i18n.fmt_usd(price))}</b>")
     feats = product_content.features(sku, lang)
     if feats:
         lines += ["", f"{vip_em('star', '🌟')} <b>{L('lbl_features')}:</b>"] + [f"• {html.escape(item)}" for item in feats]
@@ -1525,7 +1540,8 @@ def render_product_intro(sku: str, stock: int, lang: str | None = None) -> str:
         text = product_intros.INTROS[sku](vip_em, price, usdt_price, lang)
     else:
         text = product_intros.generic_intro(vip_em, str(prod["name"]) if prod else sku,
-                                            str(prod["description"] or "") if prod else "", price, usdt_price, lang)
+                                            str(prod["description"] or "") if prod else "", price, usdt_price, lang,
+                                            price_text=money_for_sku(lang, sku, price) if lang == "en" else None)
     if stock <= 0:
         return text + f"{vip_em('cross', '❌')} {t(lang, 'oos_notice')}"
     stock_line = f"{vip_em('box', '📦')} <b>{t(lang, 'lbl_stock')}:</b> <code>{t(lang, 'stock_available_value', stock=stock)}</code>\n"
@@ -2187,8 +2203,8 @@ def build_topup_menu(lang: str):
     rows = [amounts[i:i + 2] for i in range(0, len(amounts), 2)]
     rows.append([vip_btn(t(lang, "btn_topup_other"), callback_data="wtop_c", emoji_name="memo")])
     rows.append([vip_btn(t(lang, "btn_back_main"), callback_data="wallet", emoji_name="back")])
-    text = t(lang, "topup_menu", min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
-             cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND))
+    text = t(lang, "topup_menu", min=i18n.fmt_money_rate(lang, wallet_store.MIN_TOPUP_VND), max=i18n.fmt_money_rate(lang, wallet_store.MAX_TOPUP_VND),
+             cap=i18n.fmt_money_rate(lang, wallet_store.MAX_BALANCE_VND))
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -2212,8 +2228,8 @@ async def settle_and_notify_topup(bot, order_id, user_id, web_status: dict):
         try:
             await bot.send_message(
                 chat_id=int(user_id), parse_mode="HTML", reply_markup=_wallet_back_markup(lang),
-                text=f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_vnd(result.amount_vnd),
-                                                  balance=i18n.fmt_vnd(result.balance_vnd), order=html.escape(str(order_id))))
+                text=f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_money_rate(lang, result.amount_vnd),
+                                                  balance=i18n.fmt_money_rate(lang, result.balance_vnd), order=html.escape(str(order_id))))
         except Exception as error:
             logger.warning("Nạp ví: không gửi được tin báo đơn %s: %s", order_id, type(error).__name__)
     return result
@@ -2255,7 +2271,7 @@ def build_topup_method_menu(lang: str, amount: int):
     rows = [[vip_btn(t(lang, labels[m]), callback_data=f"wtm:{codes[m]}:{amount}", emoji_name="usdt" if m != "vietqr" else "card")]
             for m in topup_methods()]
     rows.append([vip_btn(t(lang, "btn_back_main"), callback_data="wtop", emoji_name="back")])
-    return t(lang, "topup_method_menu", amount=i18n.fmt_vnd(amount)), InlineKeyboardMarkup(rows)
+    return t(lang, "topup_method_menu", amount=i18n.fmt_money_rate(lang, amount)), InlineKeyboardMarkup(rows)
 
 
 async def start_topup(message, user, amount: int, lang: str) -> None:
@@ -2272,7 +2288,7 @@ async def start_topup(message, user, amount: int, lang: str) -> None:
 
 def render_usdt_topup_invoice(lang: str, order) -> str:
     key = {"plisio": "topup_usdt_plisio", "bep20": "topup_usdt_bep20", "binance": "topup_usdt_binance"}[order.method]
-    return t(lang, key, order=html.escape(order.order_id), vnd=i18n.fmt_vnd(order.amount_vnd), usdt=html.escape(order.amount_usdt),
+    return t(lang, key, order=html.escape(order.order_id), vnd=i18n.fmt_money_rate(lang, order.amount_vnd), usdt=html.escape(order.amount_usdt),
              deadline=order.expires_at[11:], address=html.escape(order.address or ""), receiver=html.escape(order.receiver_id or ""),
              confirmations=order.min_confirmations or 0, shield=vip_em('shield', '⚠️'), money=vip_em('money', '💰'),
              card=vip_em('card', '💳'), calendar=vip_em('calendar', '⏳'))
@@ -2295,8 +2311,8 @@ async def send_usdt_topup_invoice(message, user, amount: int, lang: str, method:
         key = {"invalid_amount": "topup_err_amount", "balance_cap": "topup_err_cap", "too_many_pending": "topup_err_pending",
                "usdt_minimum": "topup_err_usdt_minimum"}.get(error.code, "topup_err_unavailable")
         await message.reply_text(
-            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
-                                          cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
+            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_money_rate(lang, wallet_store.MIN_TOPUP_VND), max=i18n.fmt_money_rate(lang, wallet_store.MAX_TOPUP_VND),
+                                          cap=i18n.fmt_money_rate(lang, wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
             reply_markup=back, parse_mode="HTML")
         return
     except Exception as error:
@@ -2351,8 +2367,8 @@ async def send_topup_invoice(message, user, amount: int, lang: str, method: str 
         key = {"invalid_amount": "topup_err_amount", "balance_cap": "topup_err_cap",
                "too_many_pending": "topup_err_pending"}.get(error.code, "topup_err_unavailable")
         await message.reply_text(
-            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND),
-                                          cap=i18n.fmt_vnd(wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
+            f"{vip_em('cross', '❌')} " + t(lang, key, min=i18n.fmt_money_rate(lang, wallet_store.MIN_TOPUP_VND), max=i18n.fmt_money_rate(lang, wallet_store.MAX_TOPUP_VND),
+                                          cap=i18n.fmt_money_rate(lang, wallet_store.MAX_BALANCE_VND), limit=wallet_topup.MAX_PENDING_TOPUPS),
             reply_markup=back, parse_mode="HTML")
         return
     except Exception as error:
@@ -2396,8 +2412,8 @@ async def handle_topup_check(query, context, order, lang: str) -> None:
     if result.state == "credited":
         await query.answer(t(lang, "topup_credited_alert"), show_alert=True)
         await query.message.reply_text(
-            f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_vnd(result.amount_vnd),
-                                         balance=i18n.fmt_vnd(result.balance_vnd), order=html.escape(order_id)),
+            f"{vip_em('check', '✅')} " + t(lang, "topup_credited_msg", amount=i18n.fmt_money_rate(lang, result.amount_vnd),
+                                         balance=i18n.fmt_money_rate(lang, result.balance_vnd), order=html.escape(order_id)),
             reply_markup=_wallet_back_markup(lang), parse_mode="HTML")
     elif result.state == "already_credited":
         await query.answer(t(lang, "topup_already_alert"), show_alert=True)
@@ -2430,7 +2446,7 @@ async def handle_topup_callback(query, user, lang: str, data: str) -> None:
     elif data == "wtop_c":
         AWAITING_TOPUP_AMOUNT.add(user.id)
         await safe_edit_or_reply(
-            query, t(lang, "topup_prompt", min=i18n.fmt_vnd(wallet_store.MIN_TOPUP_VND), max=i18n.fmt_vnd(wallet_store.MAX_TOPUP_VND)),
+            query, t(lang, "topup_prompt", min=i18n.fmt_money_rate(lang, wallet_store.MIN_TOPUP_VND), max=i18n.fmt_money_rate(lang, wallet_store.MAX_TOPUP_VND)),
             reply_markup=_wallet_back_markup(lang, "wtop"), parse_mode="HTML")
     elif data.startswith("wtm:"):
         match = _TOPUP_METHOD_CB.fullmatch(data)
@@ -2537,8 +2553,8 @@ async def _notify_wallet_result(bot, result) -> None:
             await bot.send_message(
                 chat_id=int(result.user_id), parse_mode="HTML",
                 text=f"{vip_em('shield', '🛡')} " + t(lang, "wpay_refunded_msg" if result.state == "refunded" else "wpay_refunded_review_msg",
-                                                    order=html.escape(result.order_id), amount=i18n.fmt_vnd(result.amount_vnd),
-                                                    balance=i18n.fmt_vnd(result.balance_vnd or 0)),
+                                                    order=html.escape(result.order_id), amount=i18n.fmt_money_rate(lang, result.amount_vnd),
+                                                    balance=i18n.fmt_money_rate(lang, result.balance_vnd or 0)),
                 reply_markup=_wallet_back_markup(lang))
             if result.state == "refunded_review":
                 logger.warning("Trả bằng ví: đơn %s đã hoàn tiền sau quá hạn, cần admin đối soát với web", result.order_id)
@@ -2595,14 +2611,14 @@ async def handle_wallet_pay(query, context, user, lang: str, sku: str, qty: int)
         await query.answer(t(lang, "wpay_err_unavailable"), show_alert=True)
         return
     await safe_edit_or_reply(
-        query, f"{vip_em('calendar', '⏳')} " + t(lang, "wpay_processing", order=html.escape(order.order_id), amount=i18n.fmt_vnd(order.amount_vnd)),
+        query, f"{vip_em('calendar', '⏳')} " + t(lang, "wpay_processing", order=html.escape(order.order_id), amount=i18n.fmt_money_rate(lang, order.amount_vnd)),
         reply_markup=InlineKeyboardMarkup([[vip_btn(t(lang, "btn_wpay_check"), callback_data=f"confirm_pay_{order.order_id}", emoji_name="refresh")]]),
         parse_mode="HTML")
     result = await run_wallet_order(context.bot, order.order_id)
     if result.state == "completed":
         await safe_edit_or_reply(
-            query, f"{vip_em('check', '✅')} " + t(lang, "wpay_paid_msg", order=html.escape(order.order_id), amount=i18n.fmt_vnd(order.amount_vnd),
-                                                  balance=i18n.fmt_vnd(order.balance_vnd)),
+            query, f"{vip_em('check', '✅')} " + t(lang, "wpay_paid_msg", order=html.escape(order.order_id), amount=i18n.fmt_money_rate(lang, order.amount_vnd),
+                                                  balance=i18n.fmt_money_rate(lang, order.balance_vnd)),
             reply_markup=_wallet_back_markup(lang, "main_menu"), parse_mode="HTML")
 
 
@@ -2862,14 +2878,15 @@ async def show_plisio_checkout(query, user, qty, order_id=None, sku=DEFAULT_SKU)
     ]), parse_mode="HTML")
 
 
-def build_vietqr_bill(lang, order_id, product_name, qty, amount, bank_name, bank_account, bank_owner, expires_display) -> str:
+def build_vietqr_bill(lang, order_id, product_name, qty, amount, bank_name, bank_account, bank_owner, expires_display, sku=None) -> str:
+    amount_text = money_for_sku(lang, sku, amount, qty) if sku else i18n.fmt_money_rate(lang, amount)
     return (
         f"{vip_em('crown', '👑')} ═══════ {vip_em('diamond', '💎')} <b>{t(lang, 'bill_title')}</b> {vip_em('diamond', '💎')} ═══════ {vip_em('crown', '👑')}\n\n"
         f"{vip_em('tag', '🆔')} <b>{t(lang, 'bill_order_id')}:</b> <code>{order_id}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{vip_em('box', '📦')} <b>{t(lang, 'bill_service')}:</b> {html.escape(str(product_name))}\n"
         f"{vip_em('sparkle', '✨')} <b>{t(lang, 'bill_qty')}:</b> <b>{qty}</b>\n"
-        f"{vip_em('money', '💵')} <b>{t(lang, 'bill_amount')}:</b> <code>{i18n.fmt_vnd(amount)}</code>\n\n"
+        f"{vip_em('money', '💵')} <b>{t(lang, 'bill_amount')}:</b> <code>{amount_text}</code>\n\n"
         f"{vip_em('bank', '🏦')} <b>{t(lang, 'bill_bank')}:</b> <code>{bank_name}</code> {t(lang, 'bill_bank_suffix')}\n"
         f"{vip_em('card', '💳')} <b>{t(lang, 'bill_account')}:</b> <code>{bank_account}</code>\n"
         f"{vip_em('user', '👤')} <b>{t(lang, 'bill_owner')}:</b> <code>{bank_owner}</code>\n"
@@ -3005,7 +3022,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         AWAITING_QTY_USERS[user_id] = sku
         stock = get_stock_count(sku)
         prod = get_product(sku)
-        price_fmt = i18n.fmt_vnd(prod['price'])
+        price_fmt = money_for_sku(lang, sku, prod['price'])
         usdt_price = get_setting(usdt_setting_key(sku), "1")
         prompt_text = (
             f"{vip_em('crown', '👑')} ═══════ {vip_em('memo', '✏️')} <b>{t(lang, 'qty_title')}</b> {vip_em('memo', '✏️')} ═══════ {vip_em('crown', '👑')}\n\n"
@@ -3081,7 +3098,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Đồng bộ đơn hàng lên Web Dashboard wolfmod.xyz
         asyncio.create_task(sync_order_to_web_async(order_id, user_id, user.username or user.first_name, amount, "VND", "sepay", qty=qty, sku=sku))
 
-        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display)
+        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display, sku=sku)
         buttons = build_vietqr_buttons(lang, order_id, total_usdt_str)
 
         qr_bytes = generate_vietqr_png_bytes(bank_name, bank_account, bank_owner, amount, order_id)
@@ -3196,7 +3213,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display)
+        bill_text = build_vietqr_bill(lang, order_id, sku_title(sku, lang), qty, amount, bank_name, bank_account, bank_owner, expires_display, sku=sku)
         buttons = build_vietqr_buttons(lang, order_id, total_usdt_str)
 
         qr_bytes = generate_vietqr_png_bytes(bank_name, bank_account, bank_owner, amount, order_id)
