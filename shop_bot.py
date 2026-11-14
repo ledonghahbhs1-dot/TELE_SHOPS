@@ -29,9 +29,12 @@ import wallet_topup
 from i18n import t
 from telegram import (
     Update,
+    BotCommand,
+    BotCommandScopeDefault,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMediaPhoto
+    InputMediaPhoto,
+    MenuButtonCommands,
 )
 from telegram.ext import (
     Application,
@@ -1645,6 +1648,34 @@ def shop_keyboard(user_id=None, lang: str | None = None):
             keyboard.append([vip_btn(t(lang, "btn_product_oos", name=label), callback_data=cb, emoji_name="cross", icon_id=product_icon_id(sku))])
     keyboard.append([vip_btn(t(lang, "btn_back_menu"), callback_data="main_menu", emoji_name="back")])
     return InlineKeyboardMarkup(keyboard)
+
+
+# Menu lệnh khi khách gõ "/": chỉ lệnh dành cho khách (không có lệnh admin). start luôn đứng đầu.
+BOT_COMMAND_MENU = {
+    None: [("start", "Open main menu"), ("language", "Change language")],
+    "en": [("start", "Open main menu"), ("language", "Change language")],
+    "vi": [("start", "Mở menu chính"), ("language", "Đổi ngôn ngữ")],
+}
+
+
+async def setup_bot_commands(bot) -> bool:
+    """Đăng ký menu lệnh + nút Menu lúc khởi động. Lỗi chỉ ghi log warning, không làm bot sập."""
+    ok = True
+    for language_code, commands in BOT_COMMAND_MENU.items():
+        try:
+            kwargs = {"scope": BotCommandScopeDefault()}
+            if language_code:
+                kwargs["language_code"] = language_code
+            await bot.set_my_commands([BotCommand(name, desc) for name, desc in commands], **kwargs)
+        except Exception as error:
+            ok = False
+            logger.warning("Không đặt được menu lệnh (%s): %s", language_code or "default", type(error).__name__)
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception as error:
+        ok = False
+        logger.warning("Không đặt được nút Menu: %s", type(error).__name__)
+    return ok
 
 
 def language_keyboard(lang: str):
@@ -4032,6 +4063,7 @@ def run_shop_bot(token=None):
         asyncio.set_event_loop(loop)
 
     async def post_init_hook(application: Application):
+        await setup_bot_commands(application.bot)
         # asyncio.create_task(watch_and_notify_new_links(application)) # TẮT HOÀN TOÀN THEO YÊU CẦU USER
         conn = get_db_connection()
         awaiting = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE status = 'completed' AND delivery_notified_at IS NULL").fetchone()["n"]
