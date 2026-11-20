@@ -364,7 +364,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
             _, render = await self.click(f"sq:{GPT}:1")
             body = plain(render.await_args.args[1])
             self.assertIn("VIP ORDER CONFIRMATION", body)
-            self.assertIn("100,000 VNĐ", body)
+            self.assertIn("100,000 VND", body)
             self.assertIn("4.0 USDT", body)
             self.assertIn("Pay with VietQR", " ".join(texts(render.await_args.kwargs["reply_markup"])))
             _, render = await self.click(f"cv:{GPT}:1")

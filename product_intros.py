@@ -12,7 +12,7 @@ import html
 import i18n
 
 
-def generic_intro(em, name: str, description: str, price: int, usdt_price, lang: str = "en") -> str:
+def generic_intro(em, name: str, description: str, price: int, usdt_price, lang: str = "en", price_text: str | None = None) -> str:
     """Mẫu trung tính: tên, mô tả và giá đều lấy từ dữ liệu web của chính sản phẩm đó."""
     description = (description or "").strip()
     lines = [f"{em('crown', '👑')} <b>{html.escape(name)}</b> {em('crown', '👑')}\n\n"]
@@ -20,7 +20,7 @@ def generic_intro(em, name: str, description: str, price: int, usdt_price, lang:
         lines.append(f"{em('tag', '🌟')} {html.escape(description[:600])}\n\n")
     lines.append(
         f"{em('money', '💰')} <b>{i18n.t(lang, 'lbl_price')}:</b> "
-        f"<b>{i18n.t(lang, 'price_line_usdt', vnd=i18n.fmt_vnd(price), usdt=usdt_price)}</b>\n"
+        f"<b>{i18n.t(lang, 'price_line_usdt', vnd=price_text or i18n.fmt_vnd(price), usdt=usdt_price)}</b>\n"
     )
     return "".join(lines)
 
