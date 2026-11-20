@@ -136,7 +136,7 @@ class ShopButtonTests(unittest.TestCase):
     def test_buttons_have_no_mua_and_no_price(self):
         keyboard = self.keyboard({"gemini_plus": 290, "gemini_pro_account": 3, "chatgpt_go_3m": 4})
         product_buttons = [b for row in keyboard.inline_keyboard for b in row if b.callback_data != "main_menu"]
-        self.assertEqual(len(product_buttons), 3)
+        self.assertEqual(len(product_buttons), 4)  # + gemini_pro_3m (task 073)
         for button in product_buttons:
             self.assertFalse(button.text.upper().startswith("MUA"), button.text)
             self.assertNotRegex(button.text, r"\d[\d.,]*\s*(VNĐ|VND|đ)", button.text)
@@ -178,7 +178,7 @@ class ShopButtonTests(unittest.TestCase):
     def test_callback_data_is_unchanged(self):
         keyboard = self.keyboard({"gemini_plus": 5, "gemini_pro_account": 3, "chatgpt_go_3m": 4})
         self.assertEqual([b.callback_data for row in keyboard.inline_keyboard for b in row],
-                         ["buy_gemini_plus", "buy_gemini_pro_account", "buy_chatgpt_go_3m", "main_menu"])
+                         ["buy_gemini_plus", "buy_gemini_pro_account", "buy_chatgpt_go_3m", "soldout_gemini_pro_3m", "main_menu"])
 
     def test_out_of_stock_shows_het_hang_without_price(self):
         keyboard = self.keyboard({})

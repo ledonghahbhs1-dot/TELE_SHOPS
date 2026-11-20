@@ -119,7 +119,7 @@ class CatalogueTests(unittest.TestCase):
 
     def test_product_content_is_complete_in_both_languages(self):
         skus = product_content.listed_skus()
-        self.assertEqual(set(skus), {PLUS, PRO, GPT})
+        self.assertEqual(set(skus), {PLUS, PRO, GPT, "gemini_pro_3m"})
         for sku in skus:
             for lang in i18n.SUPPORTED_LANGS:
                 self.assertTrue(product_content.name(sku, lang), (sku, lang))
@@ -294,7 +294,7 @@ class BotI18nTests(unittest.IsolatedAsyncioTestCase):
             for lang, buy, name in (("vi", "MUA", "CHATGPT GO 3 THÁNG"), ("en", "BUY", "CHATGPT GO 3 MONTHS")):
                 shop_bot.set_user_lang(555, lang)
                 markup = shop_bot.shop_keyboard(555)
-                self.assertEqual(datas(markup), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{GPT}", "main_menu"])
+                self.assertEqual(datas(markup), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{GPT}", "soldout_gemini_pro_3m", "main_menu"])
                 labels = texts(markup)
                 self.assertTrue(labels[0].startswith("GOOGLE AI PLUS 12 "), labels[0])
                 self.assertFalse(labels[0].upper().startswith(buy), labels[0])

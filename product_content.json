@@ -143,5 +143,58 @@
     "usd_from_rate": true,
     "delivery_kind": "offer_link"
   },
+  "gemini_pro_3m": {
+    "needs_owner_approval": false,
+    "price_vnd_fallback": 53000,
+    "source": "Task 073: Goof yêu cầu bán offer link Google AI Pro 3 tháng (mỗi link 1 tài khoản, giao ngay sau thanh toán).",
+    "name": {
+      "vi": "Gemini Pro - 3 Tháng",
+      "en": "Gemini Pro – 3 Months"
+    },
+    "short_name": {
+      "vi": "GEMINI PRO 3 THÁNG",
+      "en": "GEMINI PRO 3 MONTHS"
+    },
+    "duration": {
+      "vi": "3 Tháng",
+      "en": "3 months"
+    },
+    "features": {
+      "vi": [
+        "Offer link Google AI Pro 3 tháng",
+        "Mỗi link dùng cho 1 tài khoản Google",
+        "Giao link ngay sau khi thanh toán được xác nhận"
+      ],
+      "en": [
+        "Google AI Pro 3-month offer link",
+        "Each link is for 1 Google account",
+        "Link delivered right after payment is confirmed"
+      ]
+    },
+    "delivery": {
+      "vi": "Mỗi đơn nhận 1 offer link (link ưu đãi) từ kho, bot gửi tự động ngay sau khi thanh toán được xác nhận. Mở link, đăng nhập tài khoản Google của bạn và làm theo màn hình kích hoạt. Mỗi link chỉ dùng cho 1 tài khoản.",
+      "en": "Each order gets 1 offer link from stock, sent automatically by the bot right after payment is confirmed. Open the link, sign in to your Google account and follow the activation screen. Each link works for 1 account only."
+    },
+    "warranty": null,
+    "notes": {
+      "vi": [
+        "Khi liên hệ CSKH, vui lòng kèm mã đơn hàng."
+      ],
+      "en": [
+        "Please include your order ID when contacting support."
+      ]
+    },
+    "offer_step2": {
+      "vi": "Đăng nhập tài khoản Google của bạn.",
+      "en": "Sign in to your Google account."
+    },
+    "offer_single_use": {
+      "vi": "Mỗi link chỉ dùng cho 1 tài khoản, đừng chia sẻ cho người khác. Cần hỗ trợ: liên hệ @wolfmodyt kèm mã đơn hàng.",
+      "en": "Each link works for 1 account only, do not share it. Need help? Contact @wolfmodyt with your order ID."
+    },
+    "usd_from_rate": true,
+    "delivery_kind": "offer_link",
+    "owner_todo": "Chính sách bảo hành chưa có nên không hiển thị; Goof điền vào 'warranty' khi xác nhận."
+  },
   "_usd_from_rate": "usd_from_rate=true: nếu web chưa có giá USDT của SKU, bot hiển thị giá USD = giá VNĐ / 25.000 (không tự đặt giá USDT khi thanh toán – hóa đơn Plisio do web tính)."
 }

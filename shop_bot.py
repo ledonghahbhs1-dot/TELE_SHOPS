@@ -837,7 +837,7 @@ BOT_PRODUCT_ICON = {
 }
 # Google logo id (from Goof, task 069). Applies to every SKU in GOOGLE_SKUS; empty = default crown/cross (e.g. to disable).
 GOOGLE_ICON_CUSTOM_EMOJI_ID = "5796314805564346672"
-GOOGLE_SKUS = ("gemini_plus", "gemini_pro_account")
+GOOGLE_SKUS = ("gemini_plus", "gemini_pro_account", "gemini_pro_3m")
 
 VIP_EMOJIS = {
     "crown": "5807868868886009920",      # 👑 Vương miện VIP
@@ -1155,9 +1155,9 @@ def format_delivered_links_message(order_id: str, delivered_links: list[str], sk
             f"{link_lines}\n\n"
             f"{vip_em('diamond', '💎')} {t(lang, 'offer_howto_title')}\n"
             f"{vip_em('num1', '1️⃣')} {t(lang, 'offer_step1')}\n"
-            f"{vip_em('num2', '2️⃣')} {t(lang, 'offer_step2')}\n"
+            f"{vip_em('num2', '2️⃣')} {product_content.field(sku, 'offer_step2', lang) or t(lang, 'offer_step2')}\n"
             f"{vip_em('num3', '3️⃣')} {t(lang, 'offer_step3')}\n\n"
-            f"{vip_em('shield', '⚠️')} {t(lang, 'offer_single_use')}"
+            f"{vip_em('shield', '⚠️')} {product_content.field(sku, 'offer_single_use', lang) or t(lang, 'offer_single_use')}"
         )
         buttons = [[vip_btn(t(lang, "btn_open_offer"), url=x, emoji_name="crown", style="primary")]
                    for x in links if x.lower().startswith(("https://", "http://"))]

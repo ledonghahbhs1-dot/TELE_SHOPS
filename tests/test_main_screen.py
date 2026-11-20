@@ -138,7 +138,7 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
         # The main menu is now compact: the products live under "Mua hàng" (shop).
         self.assertEqual(datas(markup), ["shop", "my_orders", "support", "lang_menu"])
         self.assertEqual(texts(markup), ["Mua hàng", "Đơn đã mua", "Hỗ trợ", "Ngôn ngữ: Tiếng Việt"])
-        self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"soldout_{GPT}", "main_menu"])
+        self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"soldout_{GPT}", "soldout_gemini_pro_3m", "main_menu"])
         labels = texts(shop)
         self.assertEqual(labels[0], "GOOGLE AI PLUS 12 THÁNG")
         self.assertIn("ACCOUNT GEMINI PRO FULL BENEFITS", labels[1])
@@ -155,7 +155,7 @@ class MainScreenTests(unittest.IsolatedAsyncioTestCase):
             _, markup = await self.start()
             shop = shop_bot.shop_keyboard(1)
         self.assertEqual(datas(markup), ["shop", "my_orders", "support", "lang_menu"])
-        self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{NEW}", f"soldout_{GPT}", "main_menu"])
+        self.assertEqual(datas(shop), ["buy_gemini_plus", f"buy_{PRO}", f"buy_{NEW}", f"soldout_{GPT}", "soldout_gemini_pro_3m", "main_menu"])
         self.assertTrue(any("Premium VPN 1 Year" in t and "99,000" not in t for t in texts(shop)))
 
     async def test_out_of_stock_products_are_labelled_sold_out(self):
