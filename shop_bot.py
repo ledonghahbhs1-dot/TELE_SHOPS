@@ -27,6 +27,7 @@ import wallet_admin
 import wallet_store
 import wallet_topup
 from i18n import t
+from rate_limit import Cooldown
 from telegram import (
     Update,
     BotCommand,
@@ -42,6 +43,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
+    ApplicationHandlerStop,
+    TypeHandler,
     filters
 )
 
@@ -59,22 +62,75 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ==================== CẤU HÌNH BOT ====================
 BOT_TOKEN = os.getenv("SHOP_BOT_TOKEN") or os.getenv("BOT_TOKEN", "").strip()
-ADMIN_ID = os.getenv("ADMIN_ID", "6571486853").strip() or "6571486853"  # Telegram ID của Admin (wolfmodyt)
-ADMIN_USERNAMES = ["wolfmodyt", "wolfmod"]
+# Admin = numeric Telegram user ID only. A @username can be renamed or re-registered by someone else, so it is never
+# trusted. Configure ADMIN_ID (one id) and/or ADMIN_IDS (comma separated ids) in the environment; there is no
+# built-in default, so a missing configuration means "nobody is admin" (see warn_if_admin_unconfigured).
+ADMIN_ID = os.getenv("ADMIN_ID", "").strip()
+
+
+def _parse_admin_ids(*raw_values) -> tuple:
+    ids = []
+    for raw in raw_values:
+        for part in str(raw or "").replace(";", ",").split(","):
+            part = part.strip()
+            if part.isascii() and part.isdigit() and int(part) > 0 and int(part) not in ids:
+                ids.append(int(part))
+    return tuple(ids)
+
+
+def admin_ids() -> tuple:
+    """Configured admin Telegram IDs, ADMIN_ID first (read at call time so tests/ops changes apply immediately)."""
+    return _parse_admin_ids(ADMIN_ID, os.getenv("ADMIN_IDS"))
+
+
+def primary_admin_id():
+    ids = admin_ids()
+    return ids[0] if ids else None
+
 
 def is_admin(user_or_id) -> bool:
-    """Kiểm tra quyền Admin theo Telegram ID hoặc Username @wolfmodyt"""
-    if not user_or_id:
+    """Admin check by numeric Telegram user ID (a telegram.User or a raw id). Usernames are never accepted."""
+    if user_or_id is None:
         return False
-    if hasattr(user_or_id, "id"):
-        if str(user_or_id.id) == str(ADMIN_ID) and str(ADMIN_ID) != "":
-            return True
-        username = (getattr(user_or_id, "username", "") or "").lower().replace("@", "")
-        return username in ADMIN_USERNAMES
-    uid_str = str(user_or_id).lower().replace("@", "")
-    if uid_str == str(ADMIN_ID) and str(ADMIN_ID) != "":
-        return True
-    return uid_str in ADMIN_USERNAMES
+    raw = getattr(user_or_id, "id", user_or_id)
+    if isinstance(raw, bool):
+        return False
+    try:
+        uid = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return False
+    return uid > 0 and uid in admin_ids()
+
+
+def warn_if_admin_unconfigured() -> None:
+    """Startup hint only: never crashes the bot, admin rights are simply refused while nothing is configured."""
+    if not admin_ids():
+        logger.warning("ADMIN_ID / ADMIN_IDS is not set: nobody has admin rights (admin commands and buttons are refused). "
+                       "Set ADMIN_ID (or ADMIN_IDS=id1,id2) to the numeric Telegram user ID(s) of the admin(s).")
+
+
+ADMIN_DENIED_TEXT = "⛔ Bạn không có quyền truy cập!"
+# Per-user cooldowns (task 096); admins are exempt. Separate buckets so a button tap followed by a typed value is not dropped.
+CALLBACK_COOLDOWN = Cooldown(1.0)
+COMMAND_COOLDOWN = Cooldown(1.0)
+
+
+async def rate_limit_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Task 096: pre-handler (registered in group -1 by run_shop_bot). An ordinary user's button press / command / text
+    that arrives less than a second after their previous accepted one is dropped before any handler runs (the button
+    spinner is still cleared). Admins and non-user updates pass untouched; the bot has no inbound webhooks to exempt."""
+    user = update.effective_user
+    query = update.callback_query
+    if user is None or not (query or update.message) or is_admin(user):
+        return
+    if (CALLBACK_COOLDOWN if query else COMMAND_COOLDOWN).allow(user.id):
+        return
+    if query:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+    raise ApplicationHandlerStop
 
 DATA_DIR = os.getenv("SHOP_DATA_DIR") or os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "shop_database.db")
@@ -2558,8 +2614,9 @@ async def _notify_wallet_result(bot, result) -> None:
                 reply_markup=_wallet_back_markup(lang))
             if result.state == "refunded_review":
                 logger.warning("Trả bằng ví: đơn %s đã hoàn tiền sau quá hạn, cần admin đối soát với web", result.order_id)
-                await bot.send_message(chat_id=int(ADMIN_ID), text=f"⚠️ Wallet order {result.order_id} (user {result.user_id}) was refunded after "
-                                       f"{wallet_pay.UNCERTAIN_REFUND_MINUTES} min without a confirmed delivery. Check the web order (needs_review).")
+                if primary_admin_id() is not None:
+                    await bot.send_message(chat_id=primary_admin_id(), text=f"⚠️ Wallet order {result.order_id} (user {result.user_id}) was refunded after "
+                                           f"{wallet_pay.UNCERTAIN_REFUND_MINUTES} min without a confirmed delivery. Check the web order (needs_review).")
     except Exception as error:
         logger.warning("Trả bằng ví: không gửi được thông báo đơn %s: %s", result.order_id, type(error).__name__)
 
@@ -2887,9 +2944,9 @@ def build_vietqr_bill(lang, order_id, product_name, qty, amount, bank_name, bank
         f"{vip_em('box', '📦')} <b>{t(lang, 'bill_service')}:</b> {html.escape(str(product_name))}\n"
         f"{vip_em('sparkle', '✨')} <b>{t(lang, 'bill_qty')}:</b> <b>{qty}</b>\n"
         f"{vip_em('money', '💵')} <b>{t(lang, 'bill_amount')}:</b> <code>{amount_text}</code>\n\n"
-        f"{vip_em('bank', '🏦')} <b>{t(lang, 'bill_bank')}:</b> <code>{bank_name}</code> {t(lang, 'bill_bank_suffix')}\n"
-        f"{vip_em('card', '💳')} <b>{t(lang, 'bill_account')}:</b> <code>{bank_account}</code>\n"
-        f"{vip_em('user', '👤')} <b>{t(lang, 'bill_owner')}:</b> <code>{bank_owner}</code>\n"
+        f"{vip_em('bank', '🏦')} <b>{t(lang, 'bill_bank')}:</b> <code>{html.escape(str(bank_name))}</code> {t(lang, 'bill_bank_suffix')}\n"
+        f"{vip_em('card', '💳')} <b>{t(lang, 'bill_account')}:</b> <code>{html.escape(str(bank_account))}</code>\n"
+        f"{vip_em('user', '👤')} <b>{t(lang, 'bill_owner')}:</b> <code>{html.escape(str(bank_owner))}</code>\n"
         f"{vip_em('memo', '📝')} <b>{t(lang, 'bill_memo')}:</b> <code>{order_id}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{vip_em('calendar', '⏳')} <b>{t(lang, 'bill_deadline')}:</b> {t(lang, 'bill_deadline_value', expires=expires_display)}\n"
@@ -2909,11 +2966,16 @@ def build_vietqr_buttons(lang, order_id, total_usdt_str) -> list:
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-
     data = query.data
     user = update.effective_user
     user_id = user.id
+
+    # Task 096: every management callback (admin_*) requires an admin, decided before anything else runs and with a
+    # generic answer. Checked before the plain query.answer() so the alert is actually shown.
+    if str(data or "").startswith("admin_") and not is_admin(user):
+        await query.answer(ADMIN_DENIED_TEXT, show_alert=True)
+        return
+    await query.answer()
     lang = get_user_lang(user_id)
     await asyncio.to_thread(refresh_catalogue)
     sku_cb = parse_sku_qty_callback(data)
@@ -3390,6 +3452,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cancel_order_"):
         order_id = data.replace("cancel_order_", "")
         conn = get_db_connection()
+        owned = conn.execute("SELECT user_id FROM orders WHERE order_id = ?", (order_id,)).fetchone()
+        if not owned or (not is_admin(user) and str(owned["user_id"]) != str(user_id)):
+            # Same answer for "no such order" and "someone else's order": nothing changes, nothing is revealed.
+            conn.close()
+            await query.answer(t(lang, "order_not_found"), show_alert=True)
+            return
         conn.execute("UPDATE orders SET status = 'cancelled' WHERE order_id = ? AND status = 'pending'", (order_id,))
         conn.commit()
         conn.close()
@@ -3482,9 +3550,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{vip_em('box', '📦')} <b>Tồn kho Gemini Plus VIP:</b> <code>{stock}</code> link sẵn sàng\n"
             f"{vip_em('fire', '🔥')} <b>Đơn hàng đã xuất:</b> <code>{total_sold}</code> link\n"
             f"{vip_em('money', '💰')} <b>Doanh thu VNĐ:</b> <code>{revenue_vnd:,} VNĐ</code> | <b>USDT:</b> <code>{usdt_rev:g} USDT</code>\n\n"
-            f"{vip_em('bank', '🏦')} <b>VietQR:</b> <code>{bank_name}</code> - <code>{bank_account}</code> ({bank_owner})\n"
+            f"{vip_em('bank', '🏦')} <b>VietQR:</b> <code>{html.escape(str(bank_name))}</code> - <code>{html.escape(str(bank_account))}</code> ({html.escape(str(bank_owner))})\n"
             f"{vip_em('usdt', '🪙')} <b>Ví USDT ({usdt_network}):</b> <code>{usdt_price} USDT</code>\n"
-            f"<code>{usdt_wallet}</code>\n\n"
+            f"<code>{html.escape(str(usdt_wallet))}</code>\n\n"
             f"{vip_em('diamond', '💎')} <b>Lệnh quản trị nhanh:</b>\n"
             f"{vip_em('diamond', '💎')} <code>/setprice &lt;giá_vnđ&gt;</code> - Cập nhật giá bán VNĐ\n"
             f"{vip_em('bank', '🏦')} <code>/setbank &lt;ACB&gt; &lt;STK&gt; &lt;Tên&gt;</code> - Cập nhật STK VietQR\n"
@@ -3537,10 +3605,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         delivered_links = deliver_product(order_id, order["user_id"])
         if delivered_links:
-            links_summary = "\n".join([f"• <code>{lk}</code>" for lk in delivered_links])
+            links_summary = "\n".join([f"• <code>{html.escape(str(lk))}</code>" for lk in delivered_links])
             await safe_edit_or_reply(
                 query,
-                f"{vip_em('check', '✅')} <b>ĐÃ DUYỆT ĐƠN <code>{order_id}</code> ({len(delivered_links)} link) THÀNH CÔNG!</b>\n"
+                f"{vip_em('check', '✅')} <b>ĐÃ DUYỆT ĐƠN <code>{html.escape(order_id)}</code> ({len(delivered_links)} link) THÀNH CÔNG!</b>\n"
                 f"{links_summary}",
                 parse_mode="HTML"
             )
@@ -3567,7 +3635,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
 
-        await safe_edit_or_reply(query, f"{vip_em('cross', '❌')} <b>ĐÃ TỪ CHỐI ĐƠN HÀNG <code>{order_id}</code>.</b>", parse_mode="HTML")
+        await safe_edit_or_reply(query, f"{vip_em('cross', '❌')} <b>ĐÃ TỪ CHỐI ĐƠN HÀNG <code>{html.escape(order_id)}</code>.</b>", parse_mode="HTML")
         if order:
             try:
                 await context.bot.send_message(
@@ -3628,9 +3696,9 @@ async def admin_set_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"{vip_em('check', '✅')} <b>ĐÃ CẬP NHẬT THÔNG TIN THANH TOÁN VIETQR:</b>\n\n"
-        f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{bank_name}</code>\n"
-        f"{vip_em('card', '💳')} <b>STK:</b> <code>{bank_account}</code>\n"
-        f"{vip_em('user', '👤')} <b>Chủ TK:</b> <code>{bank_owner}</code>",
+        f"{vip_em('bank', '🏦')} <b>Ngân hàng:</b> <code>{html.escape(str(bank_name))}</code>\n"
+        f"{vip_em('card', '💳')} <b>STK:</b> <code>{html.escape(str(bank_account))}</code>\n"
+        f"{vip_em('user', '👤')} <b>Chủ TK:</b> <code>{html.escape(str(bank_owner))}</code>",
         parse_mode="HTML"
     )
 
@@ -3705,11 +3773,9 @@ def get_stock_recipients() -> list:
     """Người nhận thông báo nhập kho: admin, kênh `notify_channel` (nếu đặt) và – chỉ khi bật setting
     `stock_notify_customers=true` – mọi khách đã từng dùng bot/đặt hàng. Mỗi người kèm ngôn ngữ của họ."""
     recipients: list = []
-    try:
-        admin_chat = int(ADMIN_ID)
+    admin_chat = primary_admin_id()
+    if admin_chat is not None:
         recipients.append((admin_chat, get_user_lang(admin_chat)))
-    except (TypeError, ValueError):
-        pass
     channel = get_setting("notify_channel", "").strip()
     if channel:
         recipients.append((channel, get_setting("notify_channel_lang", "vi")))
@@ -3824,7 +3890,7 @@ async def admin_handle_document(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     doc = update.message.document
-    if not doc or not doc.file_name.lower().endswith((".txt", ".log", ".csv")):
+    if not doc or not (doc.file_name or "").lower().endswith((".txt", ".log", ".csv")):
         return
 
     try:
@@ -3848,10 +3914,10 @@ async def admin_handle_document(update: Update, context: ContextTypes.DEFAULT_TY
                 for l in to_append:
                     f_cl.write(l + "\n")
 
-        await update.message.reply_text(f"{vip_em('check', '✅')} <b>Đã nhận file <code>{doc.file_name}</code> chứa {len(links)} link! Hệ thống đang nạp kho...</b>", parse_mode="HTML")
+        await update.message.reply_text(f"{vip_em('check', '✅')} <b>Đã nhận file <code>{html.escape(str(doc.file_name))}</code> chứa {len(links)} link! Hệ thống đang nạp kho...</b>", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Lỗi đọc file từ Telegram: {e}")
-        await update.message.reply_text(f"{vip_em('cross', '❌')} <b>Lỗi xử lý file:</b> <code>{e}</code>", parse_mode="HTML")
+        await update.message.reply_text(f"{vip_em('cross', '❌')} <b>Lỗi xử lý file:</b> <code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
 async def admin_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -3861,7 +3927,7 @@ async def admin_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         cur_chan = get_setting("notify_channel", "Chưa cài đặt (Mặc định gửi Admin)")
         await update.message.reply_text(
-            f"📢 <b>Kênh thông báo kho hiện tại:</b> <code>{cur_chan}</code>\n\n"
+            f"📢 <b>Kênh thông báo kho hiện tại:</b> <code>{html.escape(str(cur_chan))}</code>\n\n"
             f"💡 <b>Cú pháp cài đặt:</b> <code>/setchannel &lt;@channel_name hoặc id&gt;</code>\n"
             f"Ví dụ: <code>/setchannel @wolfmodyt_channel</code> hoặc <code>/setchannel -1001234567890</code>",
             parse_mode="HTML"
@@ -3869,7 +3935,7 @@ async def admin_set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     channel = args[0].strip()
     set_setting("notify_channel", channel)
-    await update.message.reply_text(f"{vip_em('check', '✅')} <b>Đã cài đặt kênh nhận thông báo kho mới:</b> <code>{channel}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"{vip_em('check', '✅')} <b>Đã cài đặt kênh nhận thông báo kho mới:</b> <code>{html.escape(channel)}</code>", parse_mode="HTML")
 
 async def handle_user_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý tin nhắn văn bản tự do của người dùng (ví dụ: nhập số lượng link tùy chỉnh)"""
@@ -4068,6 +4134,7 @@ def run_shop_bot(token=None):
         print("[X] Chưa cấu hình BOT_TOKEN! Vui lòng cung cấp token hoặc thiết lập trong .env")
         return
 
+    warn_if_admin_unconfigured()
     init_database()
     sync_all_pending_orders_on_startup()
 
@@ -4093,6 +4160,8 @@ def run_shop_bot(token=None):
         asyncio.create_task(stock_watch_task(application))
 
     app = Application.builder().token(use_token).post_init(post_init_hook).build()
+
+    app.add_handler(TypeHandler(Update, rate_limit_gate), group=-1)  # task 096: per-user cooldown before every handler
 
     # User commands (hỗ trợ cả /start, .start, /menu, .menu, /help, .help)
     app.add_handler(CommandHandler(["start", "menu", "help"], start_command))

@@ -194,9 +194,12 @@ class CommandTests(Base):
         self.assertEqual(self.ledger_count(), 0)
         self.assertFalse(os.path.exists(wa.backup_dir(self.directory.name)))
 
-    def test_admin_by_username_is_accepted_like_other_admin_commands(self):
-        sent = self.run_command(shop_bot.admin_wallet_add, "/wallet_add 5 1000 x", user_id=222, username="wolfmodyt")
-        self.assertIn("Đã ghi", sent.replies[0])
+    def test_admin_by_username_is_refused_only_the_numeric_id_counts(self):
+        # Task 096: a Telegram @username can be renamed or re-registered, so it never grants admin rights.
+        for username in ("wolfmodyt", "wolfmod"):
+            sent = self.run_command(shop_bot.admin_wallet_add, "/wallet_add 5 1000 x", user_id=222, username=username)
+            self.assertIn("không có quyền", sent.replies[0])
+        self.assertEqual(self.ledger_count(), 0)
 
     def test_group_chat_is_refused_even_for_admin(self):
         for handler, text in ((shop_bot.admin_wallet_add, "/wallet_add 5 1000 x"), (shop_bot.admin_backup_command, "/backup")):
